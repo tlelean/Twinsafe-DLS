@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from .config import FRONTEND_DIR, PDF_DIR
-from .pages import automation, channel_names, live_trend, pdf_viewer, pressure_display, sew, test_details, test_details_production
+from .pages import live_trend, pdf_viewer, test_details_production
 
 app = FastAPI()
 
@@ -15,13 +15,8 @@ app.add_middleware(
 )
 
 # Page-specific routers
-app.include_router(automation.router)
-app.include_router(channel_names.router)
-app.include_router(test_details.router)
 app.include_router(live_trend.router)
 app.include_router(pdf_viewer.router)
-app.include_router(pressure_display.router)
-app.include_router(sew.router)
 app.include_router(test_details_production.router)
 
 # Static / frontend
