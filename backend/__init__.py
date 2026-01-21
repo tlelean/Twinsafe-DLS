@@ -1,0 +1,1 @@
+from .main import app  # so `backend:app` also works

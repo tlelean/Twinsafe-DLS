@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <!-- Tailwind bundle -->
+  <script src="/src/assets/tailwind.js"></script>
+  <link rel="stylesheet" href="/src/styles/main.css" />
+
+  <script>window.NavBarConfig = {};</script>
+  <script src="/src/components/nav_bar.js" defer></script>
+
+</head>
+
+<body class="body-styles h-screen bg-neutral-900 text-neutral-100 flex flex-col overflow-hidden">
+
+  <div class="flex flex-1 overflow-hidden">
+    <!-- Sidebar -->
+    <aside class="w-96 border-r border-neutral-800 bg-black/80 flex flex-col">
+      <div class="px-3 py-2 border-b border-neutral-800 flex items-center gap-2">
+        <input
+          id="searchInput"
+          type="text"
+          placeholder="Search..."
+          class="flex-1 rounded-md bg-neutral-900 border border-neutral-700 h-10 px-3 text-base
+                 placeholder:text-neutral-500 focus:outline-none focus:ring-1 focus:ring-neutral-400"
+        />
+        <button
+          id="clearSearch"
+          type="button"
+          class="btn h-10 px-4"
+        >
+          Clear
+        </button>
+      </div>
+
+      <div class="flex-1 overflow-y-auto">
+        <ul id="fileList" class="text-lg divide-y divide-neutral-800"></ul>
+      </div>
+    </aside>
+
+    <!-- Viewer -->
+    <main id="pdfContainer" class="flex-1 flex items-center justify-center bg-neutral-900">
+      <!-- Only 5px padding, nothing else -->
+      <div id="pdfWrapper" class="pdf-wrapper">
+        <canvas id="pdfCanvas" class="block"></canvas>
+      </div>
+    </main>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
+  <script>
+    const pdfDirBaseUrl = '/api/pdf';
+    const listEndpoint  = '/api/pdf-list';
+
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+    const canvas      = document.getElementById('pdfCanvas');
+    const ctx         = canvas.getContext('2d');
+    const container   = document.getElementById('pdfContainer');
+    const wrapper     = document.getElementById('pdfWrapper');
+    const fileList    = document.getElementById('fileList');
+    const searchBox   = document.getElementById('searchInput');
+    const clearSearch = document.getElementById('clearSearch');
+
+    let pdfFiles = [];
+    let filteredFiles = [];
+    let currentPdf = null;
+    let currentFileName = null;
+
+    // Extract a timestamp from filenames like "..._18-11-2025_14-21-27.pdf"
+    function extractTimestamp(filename) {
+      try {
+        const nameNoExt = filename.replace(/\.pdf$/i, '');
+        const parts = nameNoExt.split('_');
+
+        // Expect last 2 parts to be date and time
+        const datePart = parts[parts.length - 2]; // "18-11-2025"
+        const timePart = parts[parts.length - 1]; // "14-21-27"
+
+        const [d, m, y]      = datePart.split('-').map(Number);
+        const [hh, mm, ss]   = timePart.split('-').map(Number);
+
+        if (!d || !m || !y || hh === undefined || mm === undefined || ss === undefined) {
+          return 0;
+        }
+
+        return new Date(y, m - 1, d, hh, mm, ss).getTime();
+      } catch (e) {
+        // If format doesn't match, push it to the bottom
+        return 0;
+      }
+    }
+
+    async function fetchPdfList() {
+      try {
+        const r = await fetch(listEndpoint);
+        const raw = await r.json();
+
+        pdfFiles = (raw.files || [])
+          .filter(n => typeof n === 'string' && n.toLowerCase().endsWith('.pdf'));
+
+        filteredFiles = [...pdfFiles];
+        renderFileList();
+
+        // Only auto-load if nothing is selected yet
+        if (!currentFileName && pdfFiles.length > 0) {
+          selectFile(pdfFiles[0]); // newest-first from backend
+        }
+      } catch (err) {
+        console.error("Failed to fetch PDF list:", err);
+      }
+    }
+
+    function renderFileList() {
+      fileList.innerHTML = '';
+
+      if (!filteredFiles.length) {
+        const li = document.createElement('li');
+        li.className = 'px-3 py-2 text-neutral-500 text-base';
+        li.textContent = 'No matching PDFs';
+        fileList.appendChild(li);
+        return;
+      }
+
+      filteredFiles.forEach(name => {
+        const li = document.createElement('li');
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = name;
+        btn.dataset.filename = name;
+
+        btn.className =
+          'w-full text-left px-3 py-2 text-lg hover:bg-neutral-800 ' +
+          (name === currentFileName ? 'bg-neutral-800 text-white' : 'text-neutral-200');
+
+        li.appendChild(btn);
+        fileList.appendChild(li);
+      });
+    }
+
+    function selectFile(name) {
+      currentFileName = name;
+      renderFileList();
+      loadPdf(name);
+    }
+
+    function loadPdf(filename) {
+      const url = `${pdfDirBaseUrl}/${encodeURIComponent(filename)}`;
+      pdfjsLib.getDocument(url).promise.then(pdf => {
+        currentPdf = pdf;
+        renderPage();
+      });
+    }
+
+    function renderPage() {
+      if (!currentPdf) return;
+
+      currentPdf.getPage(1).then(page => {
+        const viewport = page.getViewport({ scale: 1 });
+
+        // Available space = container minus wrapper padding (5px each side)
+        const contW = container.clientWidth  - 10; // 5px left + 5px right
+        const contH = container.clientHeight - 10; // 5px top + 5px bottom
+
+        const scaleX = contW / viewport.width;
+        const scaleY = contH / viewport.height;
+
+        const scale = Math.min(scaleX, scaleY);
+        const scaled = page.getViewport({ scale });
+
+        canvas.width  = scaled.width;
+        canvas.height = scaled.height;
+
+        page.render({
+          canvasContext: ctx,
+          viewport: scaled
+        });
+      });
+    }
+
+    function applySearchFilter(query) {
+      const q = query.toLowerCase().trim();
+      filteredFiles = pdfFiles.filter(f => f.toLowerCase().includes(q));
+      renderFileList();
+    }
+
+    searchBox.addEventListener('input', () => applySearchFilter(searchBox.value));
+
+    clearSearch.addEventListener('click', () => {
+      searchBox.value = '';
+      applySearchFilter('');
+      searchBox.focus();
+    });
+
+    fileList.addEventListener('click', e => {
+      const btn = e.target.closest('button[data-filename]');
+      if (btn) selectFile(btn.dataset.filename);
+    });
+
+    window.addEventListener('resize', () => {
+      if (currentPdf) renderPage();
+    });
+
+    fetchPdfList();
+  </script>
+</body>
+</html>

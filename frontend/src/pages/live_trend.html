@@ -1,0 +1,1739 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>Trend Viewer – Live Mode</title>
+  <script src="/src/assets/plotly-latest.min.js"></script>
+  <script src="/src/assets/tailwind.js"></script>
+  <link rel="stylesheet" href="/src/styles/main.css" />
+
+  <script>window.NavBarConfig = {};</script>
+  <script src="/src/components/nav_bar.js" defer></script>
+</head>
+<body class="body-styles flex flex-col h-screen">
+  <main class="flex-grow relative">
+    <div id="chart" class="chart-container"></div>
+
+    <!-- Controls -->
+    <div
+      id="controlOverlay"
+      class="absolute bottom-0 right-0 bg-[#272727] bg-opacity-80 px-2 py-1.5 rounded-2xl shadow-lg z-10"
+    >
+      <div class="control-grid flex items-center gap-2">
+        <select
+          id="timeWindowSelect"
+          class="w-[120px] h-8 px-3 bg-black text-white border border-gray-700 rounded-xl text-sm leading-none appearance-none"
+        >
+          <option value="10000">10s</option>
+          <option value="30000">30s</option>
+          <option value="60000" selected>1m</option>
+          <option value="300000">5m</option>
+          <option value="900000">15m</option>
+          <option value="1800000">30m</option>
+          <option value="3600000">1h</option>
+        </select>
+
+        <button
+          id="pausePlayBtn"
+          class="btn w-[120px] h-8 flex items-center justify-center text-sm"
+          type="button"
+        >
+          Pause
+        </button>
+
+        <button
+          id="measurementToggleBtn"
+          class="btn w-[120px] h-8 flex items-center justify-center text-sm"
+          type="button"
+        >
+          Cursors On
+        </button>
+      </div>
+    </div>
+
+    <!-- Measurement overlay -->
+    <div id="measurementOverlay" class="measurement-overlay hidden"></div>
+
+    <!-- Loading overlay -->
+    <div
+      id="messageOverlay"
+      class="absolute inset-0 bg-black bg-opacity-95 flex items-center justify-center p-4"
+    >
+      <div class="text-center text-white">
+        <div class="spinner mx-auto"></div>
+        <h3 class="mt-4 text-lg font-medium">Loading historical data...</h3>
+      </div>
+    </div>
+
+    <!-- Pinned hover panel -->
+    <div id="pinnedHover" class="pinned-hover"></div>
+  </main>
+
+  <script>
+    // === DOM ELEMENTS ===
+    const chartDiv = document.getElementById('chart');
+    const messageOverlay = document.getElementById('messageOverlay');
+    const pausePlayBtn = document.getElementById('pausePlayBtn');
+    const timeWindowSelect = document.getElementById('timeWindowSelect');
+    const measurementToggleBtn = document.getElementById('measurementToggleBtn');
+    const pinnedHover = document.getElementById('pinnedHover');
+    const measurementOverlay = document.getElementById('measurementOverlay');
+    const controlOverlay = document.getElementById('controlOverlay');
+
+    // === STATE ===
+    let timeWindow = 60000;
+    let liveUpdatesPaused = false;
+    let liveInterval = null;
+    let renderInterval = null;
+    let dataBuffer = [];
+    let lastTimestamp = null;
+    let lastRelayout = 0;
+
+    // Hover state
+    let lastHoverTime = null;
+    let isPointerOverChart = false;
+    let unhoverTimer = null;
+    const UNHOVER_GRACE_MS = 200;
+
+    // Panel state
+    let pinnedHoverInside = false;
+    const PINNED_REFRESH_MS = 120;
+    let lastPinnedRenderAt = 0;
+    let lastBuiltMaskKey = '';
+
+    // Visibility control
+    let currentVis = [];
+    let serverVisMask = [];
+    let userOverride = [];
+
+    // Highlight state
+    const highlighted = new Set();
+
+    // Measurement state
+    let measurementModeActive = false;
+    let measurementCursors = null;
+    let measurementEditRevision = 0;
+    let measurementHandleLayer = null;
+    let measurementHandleElements = [];
+    let measurementHandleDrag = null;
+    let measurementCursorAnchors = null;
+    let skipAnchorSnapOnNextRelayout = false;
+    const MEASUREMENT_HANDLE_COLORS = ['#ffffff', '#ffffff'];
+    let measurementRowsEl = null;
+    let measurementRowsScrollTop = 0;
+    let measurementRowsScrollHeight = 0;
+    let measurementRowsClientHeight = 0;
+
+    let draggingTraceIndex = null;
+    let dropTargetTraceIndex = null;
+    let dropTargetBefore = false;
+    let skipNextRowClick = false;
+
+    // === CONSTANTS ===
+    const RENDER_INTERVAL = 500;
+    const RELAYOUT_INTERVAL = 500;
+
+    // sampling / history (matches your CSV)
+    const SAMPLE_PERIOD_MS = 100;       // 100 ms logging
+    const MAX_POINTS = 30000;           // max rows in historical.csv
+    const MAX_POINTS_PER_FLUSH = 150;   // max new samples per render tick
+
+    const API = '/api';
+
+    // 27-channel layout matching your CODESYS / OPC list
+    const defaultChannelNames = [
+      "Upstream","Downstream","Body","Actuator","Hyperbaric","Backseat",
+      "Spring Chamber","Primary Stem Seal","Secondary Stem Seal","Relief Port","BX Port","Flow Meter",
+      "Mass Spectrometer Mantissa","Mass Spectrometer","LVDT","Torque","Number Of Turns","Motor Speed",
+      "Ambient Temperature","Body Temperature","Monitor Temperature","Chamber Temperature","Hyperbaric Water Temperature",
+      "Close","Open","Cycle Count"
+    ];
+
+    const tracesCount = defaultChannelNames.length;
+
+    let channelNames = defaultChannelNames.slice();
+
+    const defaultChannelOrder = Array.from({ length: tracesCount }, (_, i) => i);
+    let channelOrder = defaultChannelOrder.slice();
+
+    const colorsMap = {
+      'Upstream': '#FF0000','Downstream': '#00B050','Body': '#FFA500','Actuator': '#FFFFFF','Hyperbaric': '#0000FF',
+      'Backseat': '#00FFFF','Spring Chamber': '#FF00FF','Primary Stem Seal': '#80FF00','Secondary Stem Seal': '#400080',
+      'Relief Port': '#008080','BX Port': '#800000','Flow Meter': '#808000','Mass Spectrometer Mantissa': '#FF66CC',
+      'Mass Spectrometer': '#66B2FF','LVDT': '#99FF33','Torque': '#663300','Number Of Turns': '#00FFAA',
+      'Motor Speed': '#336699','Ambient Temperature': '#0000FF','Body Temperature': '#00B050',
+      'Monitor Temperature': '#FFA500','Chamber Temperature': '#FFFFFF','Hyperbaric Water Temperature': '#FF0000',
+      'Close': '#00FFFF','Open': '#FF00FF','Cycle Count': '#80FF00',
+    };
+
+    const lineStyleGroup = {
+      'Upstream': '-','Downstream': '-','Body': '-','Actuator': '-','Hyperbaric': '-','Backseat': '-',
+      'Spring Chamber': '-','Primary Stem Seal': '-','Secondary Stem Seal': '-','Relief Port': '-','BX Port': '-',
+      'Flow Meter': '-','Mass Spectrometer Mantissa': '-','Mass Spectrometer': '-','LVDT': '-','Torque': '-',
+      'Number Of Turns': '-','Motor Speed': '-','Ambient Temperature': 'dot','Body Temperature': 'dot',
+      'Monitor Temperature': 'dot','Chamber Temperature': 'dot','Hyperbaric Water Temperature': 'dot','Close': 'dot',
+      'Open': 'dot','Cycle Count': 'dot',
+    };
+
+    const groupMap = {
+      "Upstream": "Pressure", "Downstream": "Pressure", "Body": "Pressure", "Actuator": "Pressure",
+      "Hyperbaric": "Pressure", "Backseat": "Pressure", "Spring Chamber": "Pressure",
+      "Primary Stem Seal": "Pressure", "Secondary Stem Seal": "Pressure", "Relief Port": "Pressure",
+      "BX Port": "Pressure", "Flow Meter": "Flow Meter",
+      "Mass Spectrometer Mantissa": "Mass Spectrometer", "Mass Spectrometer": "Mass Spectrometer",
+      "LVDT": "LVDT", "Torque": "Torque", "Number Of Turns": "Number Of Turns", "Motor Speed": "Motor Speed",
+      "Ambient Temperature": "Temperature", "Body Temperature": "Temperature",
+      "Monitor Temperature": "Temperature", "Chamber Temperature": "Temperature",
+      "Hyperbaric Water Temperature": "Temperature", "Close": "Valve State", "Open": "Valve State",
+      "Cycle Count": "Cycle Count"
+    };
+
+    const axisConfig = {
+      "Pressure": { rangemode: 'tozero', autorange: true },
+      "Temperature": { range: [-60, 260], autorange: false },
+    };
+
+    const CHANNEL_UNITS_MAP = {
+      'Upstream': 'psi','Downstream': 'psi','Body': 'psi','Actuator': 'psi','Hyperbaric': 'psi','Backseat': 'psi',
+      'Spring Chamber': 'psi','Primary Stem Seal': 'psi','Secondary Stem Seal': 'psi','Relief Port': 'psi',
+      'BX Port': 'psi','Flow Meter': 'ml/min','Mass Spectrometer Mantissa': 'mbarl/sec','Mass Spectrometer': 'mbarl/sec',
+      'LVDT': 'mm','Torque': 'lbs-ft','Number Of Turns': '','Motor Speed': 'rpm','Ambient Temperature': '°C',
+      'Body Temperature': '°C','Monitor Temperature': '°C','Chamber Temperature': '°C','Hyperbaric Water Temperature': '°C',
+      'Close': '','Open': '','Cycle Count': ''
+    };
+
+    // === INIT ===
+    document.addEventListener('DOMContentLoaded', () => {
+      timeWindowSelect.addEventListener('change', e => {
+        timeWindow = parseInt(e.target.value, 10);
+        // Reload historical.csv using the new window, and restart live streaming
+        loadInitialCSV();
+      });
+
+      pausePlayBtn.addEventListener('click', toggleLiveUpdates);
+
+      measurementToggleBtn.addEventListener('click', () => {
+        if (measurementModeActive) {
+          disableMeasurementMode();
+        } else {
+          enableMeasurementMode();
+        }
+        updateMeasurementToggleButton();
+      });
+
+      updatePausePlayButton();
+      window.addEventListener('resize', updatePinnedHoverConstraints);
+      updatePinnedHoverConstraints();
+
+      // Toggle visibility via clicks + star highlight handling
+      pinnedHover.addEventListener('pointerup', (e) => {
+        const resetBtn = e.target.closest('.ph-reset');
+        if (resetBtn) {
+          e.stopPropagation(); e.preventDefault();
+          resetChannelOrder();
+          return;
+        }
+
+        if (skipNextRowClick) {
+          skipNextRowClick = false;
+          e.stopPropagation(); e.preventDefault();
+          return;
+        }
+
+        const starEl = e.target.closest('.ph-star');
+        if (starEl) {
+          e.stopPropagation(); e.preventDefault();
+          const row = starEl.closest('.ph-row');
+          const idx = Number(row?.dataset?.index);
+          if (Number.isInteger(idx)) {
+            if (e.ctrlKey || e.metaKey) soloHighlight(idx);
+            else toggleHighlight(idx);
+          }
+          return;
+        }
+
+        const row = e.target.closest('.ph-row');
+        if (!row) return;
+        e.stopPropagation(); e.preventDefault();
+        const idx = Number(row.dataset.index);
+        if (Number.isInteger(idx)) toggleTraceVisibility(idx);
+      });
+
+      pinnedHover.addEventListener('dragstart', onPinnedRowDragStart);
+      pinnedHover.addEventListener('dragover', onPinnedRowDragOver);
+      pinnedHover.addEventListener('drop', onPinnedRowDrop);
+      pinnedHover.addEventListener('dragend', onPinnedRowDragEnd);
+      pinnedHover.addEventListener('dragleave', onPinnedRowDragLeave);
+
+      // Track whether the cursor is inside the info panel
+      pinnedHover.addEventListener('mouseenter', () => { pinnedHoverInside = true; });
+      pinnedHover.addEventListener('mouseleave', () => { pinnedHoverInside = false; refreshPinnedForCurrentMode(true); });
+
+      // Track pointer over chart
+      chartDiv.addEventListener('mouseenter', () => { isPointerOverChart = true; clearUnhoverTimer(); });
+      chartDiv.addEventListener('mouseleave', () => { isPointerOverChart = false; scheduleUnhoverClear(); });
+
+      pinnedHover.classList.remove('hidden');
+      loadInitialCSV();
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && !liveUpdatesPaused) loadInitialCSV();
+    });
+
+    // === UI HELPERS ===
+    function showLoading(msg) {
+      messageOverlay.querySelector('h3').textContent = msg;
+      messageOverlay.classList.remove('hidden');
+    }
+    function hideLoading() { messageOverlay.classList.add('hidden'); }
+
+    function toggleLiveUpdates() {
+      liveUpdatesPaused = !liveUpdatesPaused;
+      if (liveUpdatesPaused) {
+        stopLivePlot();
+      } else {
+        loadInitialCSV();
+      }
+          updatePausePlayButton();
+    }
+
+    function updatePausePlayButton() {
+      if (!pausePlayBtn) return;
+      if (liveUpdatesPaused) {
+        pausePlayBtn.textContent = 'Play';
+        pausePlayBtn.classList.add('btn-green');
+      } else {
+        pausePlayBtn.textContent = 'Pause';
+        pausePlayBtn.classList.remove('btn-green');
+      }
+    }
+
+    function updateMeasurementToggleButton() {
+      if (!measurementToggleBtn) return;
+      measurementToggleBtn.textContent = measurementModeActive ? 'Cursors Off' : 'Cursors On';
+    }
+
+    // === HOVER TIMERS ===
+    function clearUnhoverTimer() {
+      if (unhoverTimer) { clearTimeout(unhoverTimer); unhoverTimer = null; }
+    }
+    function scheduleUnhoverClear() {
+      clearUnhoverTimer();
+      unhoverTimer = setTimeout(() => {
+        if (!isPointerOverChart) {
+          lastHoverTime = null;
+          updatePinnedToLatest();
+        }
+      }, UNHOVER_GRACE_MS);
+    }
+
+    function updatePinnedHoverConstraints() {
+      if (!pinnedHover) return;
+      const pinnedRect = pinnedHover.getBoundingClientRect();
+      const pinnedTop = Number.isFinite(pinnedRect?.top) ? pinnedRect.top : 0;
+      let bottomLimit = window.innerHeight - 12;
+
+      if (controlOverlay) {
+        const controlRect = controlOverlay.getBoundingClientRect();
+        if (controlRect && Number.isFinite(controlRect.top)) {
+          bottomLimit = Math.min(bottomLimit, controlRect.top - 12);
+        }
+      }
+
+      if (measurementOverlay && !measurementOverlay.classList.contains('hidden')) {
+        const measurementRect = measurementOverlay.getBoundingClientRect();
+        if (measurementRect && Number.isFinite(measurementRect.top)) {
+          bottomLimit = Math.min(bottomLimit, measurementRect.top - 16);
+        }
+      }
+
+      const clearance = bottomLimit - pinnedTop;
+      const available = Math.max(0, Math.floor(clearance));
+      pinnedHover.style.maxHeight = `${available}px`;
+
+      const rowsEl = pinnedHover.querySelector('.ph-rows');
+      if (rowsEl) {
+        const headerEl = pinnedHover.querySelector('.ph-time');
+        let headerHeight = 0;
+        if (headerEl) {
+          const headerRect = headerEl.getBoundingClientRect();
+          headerHeight = Number.isFinite(headerRect?.height) ? headerRect.height : 0;
+        }
+
+        const computed = window.getComputedStyle(pinnedHover);
+        const toNumber = (value) => {
+          const parsed = parseFloat(value);
+          return Number.isFinite(parsed) ? parsed : 0;
+        };
+        const paddingTop = toNumber(computed?.paddingTop);
+        const paddingBottom = toNumber(computed?.paddingBottom);
+        const gapY = toNumber(computed?.rowGap || computed?.gap);
+        const rowsMax = Math.max(0, available - headerHeight - paddingTop - paddingBottom - gapY);
+        rowsEl.style.maxHeight = `${rowsMax}px`;
+      }
+    }
+
+    // === PINNED PANEL RENDERING ===
+    function setPinnedContent(html, force = false) {
+      const now = performance.now();
+      if (!force && (now - lastPinnedRenderAt) < PINNED_REFRESH_MS) return;
+      pinnedHover.innerHTML = html;
+      lastPinnedRenderAt = now;
+      requestAnimationFrame(updatePinnedHoverConstraints);
+    }
+
+    function maskKey(mask) {
+      if (!mask || !mask.length) return '';
+      const on = [];
+      for (let i = 0; i < Math.min(mask.length, tracesCount); i++) if (mask[i]) on.push(i);
+      return on.join(',');
+    }
+
+    function getLatestTime() {
+      if (lastTimestamp instanceof Date && !Number.isNaN(lastTimestamp.getTime())) return lastTimestamp;
+      let best = null;
+      if (chartDiv?.data?.length) {
+        for (const tr of chartDiv.data) {
+          const xs = tr?.x;
+          if (xs && xs.length) {
+            const x = xs[xs.length - 1];
+            const t = (x instanceof Date) ? x : new Date(x);
+            if (!Number.isNaN(t.getTime()) && (!best || t > best)) best = t;
+          }
+        }
+      }
+      return best || new Date();
+    }
+
+    function updatePinnedToLatest(force = false) {
+      const t = getLatestTime();
+      renderPinnedForTime(t, force);
+      pinnedHover.classList.remove('hidden');
+    }
+
+    function refreshPinnedForCurrentMode(force = false) {
+      if (isPointerOverChart && lastHoverTime) {
+        renderPinnedForTime(lastHoverTime, force);
+      } else if (lastHoverTime) {
+        renderPinnedForTime(lastHoverTime, force);
+      } else {
+        updatePinnedToLatest(force);
+      }
+    }
+
+    function softUpdatePinnedForTime(time) {
+      if (!serverVisMask || !serverVisMask.length) return;
+      const t = (time instanceof Date) ? time : new Date(time);
+
+      for (let i = 0; i < Math.min(serverVisMask.length, tracesCount); i++) {
+        if (!serverVisMask[i]) continue;
+        const row = pinnedHover.querySelector(`.ph-row[data-index="${i}"]`);
+        if (!row) continue;
+
+        const valEl = row.querySelector('.ph-value > span[data-role="val"]');
+        if (valEl) {
+          const value = sampleTraceValueAt(i, t);
+          valEl.textContent = formatHoverValue(value);
+        }
+
+        const shown = getTraceVisible(i);
+        row.classList.toggle('is-hidden', !shown);
+
+        const strokeEl = row.querySelector('span[data-role="stroke"]');
+        if (strokeEl) {
+          const trace = chartDiv.data?.[i];
+          const baseColor = trace?.line?.color || colorsMap[channelNames[i]] || '#fff';
+          const strokeColor = shown ? baseColor : '#6b7280';
+          strokeEl.style.borderTopColor = strokeColor;
+        }
+
+        const active = highlighted.has(i);
+        row.classList.toggle('is-highlighted', active);
+        const star = row.querySelector('.ph-star');
+        if (star) star.setAttribute('data-active', active ? 'true' : 'false');
+        const trace = chartDiv.data?.[i];
+        const color = trace?.line?.color || colorsMap[channelNames[i]] || '#fff';
+        row.style.background = active ? hexToRgba(color, 0.28) : '';
+        row.style.boxShadow = active ? `0 0 0 1px ${hexToRgba(color, 0.5)}, 0 0 14px ${hexToRgba(color, 0.35)}` : '';
+      }
+
+      const timeTextEl = pinnedHover.querySelector('.ph-time span[data-role="time-text"]');
+      if (timeTextEl) timeTextEl.textContent = formatTimeForHeader(t);
+
+      const resetBtn = pinnedHover.querySelector('.ph-reset');
+      if (resetBtn) resetBtn.disabled = isDefaultChannelOrder();
+
+      if (measurementModeActive) updateMeasurementOverlay();
+    }
+
+    function renderPinnedForTime(time, force = false) {
+      const nowKey = maskKey(serverVisMask);
+      const needRebuild = force || (nowKey !== lastBuiltMaskKey) || !pinnedHover.querySelector('.ph-rows');
+
+      if (pinnedHoverInside && !needRebuild) {
+        softUpdatePinnedForTime(time);
+      } else {
+        setPinnedContent(buildPinnedHoverContentForTime(time), force);
+        lastBuiltMaskKey = nowKey;
+        softUpdatePinnedForTime(time);
+      }
+    }
+
+    function ensureChannelOrderIntegrity() {
+      const full = channelNames.map((_, i) => i);
+      if (!Array.isArray(channelOrder) || !channelOrder.length) {
+        channelOrder = full.slice();
+        return channelOrder;
+      }
+
+      const seen = new Set();
+      const filtered = [];
+      for (const idx of channelOrder) {
+        if (!Number.isInteger(idx)) continue;
+        if (idx < 0 || idx >= full.length) continue;
+        if (seen.has(idx)) continue;
+        filtered.push(idx);
+        seen.add(idx);
+      }
+      for (const idx of full) {
+        if (!seen.has(idx)) filtered.push(idx);
+      }
+      channelOrder = filtered;
+      return channelOrder;
+    }
+
+    function isDefaultChannelOrder() {
+      ensureChannelOrderIntegrity();
+      if (channelOrder.length !== defaultChannelOrder.length) return false;
+      for (let i = 0; i < channelOrder.length; i++) {
+        if (channelOrder[i] !== defaultChannelOrder[i]) return false;
+      }
+      return true;
+    }
+
+    function resetChannelOrder() {
+      channelOrder = defaultChannelOrder.slice();
+      refreshPinnedForCurrentMode(true);
+    }
+
+    function reorderChannelOrder(sourceTraceIdx, targetTraceIdx, placeBefore) {
+      ensureChannelOrderIntegrity();
+      const next = channelOrder.slice();
+      const fromIdx = next.indexOf(sourceTraceIdx);
+      if (fromIdx === -1) return;
+
+      if (!Number.isInteger(targetTraceIdx)) {
+        const [moved] = next.splice(fromIdx, 1);
+        next.push(moved);
+        channelOrder = next;
+        refreshPinnedForCurrentMode(true);
+        return;
+      }
+
+      let toIdx = next.indexOf(targetTraceIdx);
+      if (toIdx === -1) return;
+
+      const [moved] = next.splice(fromIdx, 1);
+      if (placeBefore) {
+        if (fromIdx < toIdx) toIdx -= 1;
+        next.splice(Math.max(0, toIdx), 0, moved);
+      } else {
+        if (fromIdx < toIdx) toIdx -= 1;
+        next.splice(Math.min(next.length, toIdx + 1), 0, moved);
+      }
+
+      channelOrder = next;
+      refreshPinnedForCurrentMode(true);
+    }
+
+    function clearPinnedRowDragIndicators() {
+      const rows = pinnedHover?.querySelectorAll?.('.ph-row');
+      if (!rows) return;
+      rows.forEach(row => row.classList.remove('drag-over-top', 'drag-over-bottom', 'is-dragging'));
+    }
+
+    function onPinnedRowDragStart(e) {
+      const row = e.target.closest?.('.ph-row');
+      if (!row) return;
+      const traceIdx = Number(row.dataset.index);
+      if (!Number.isInteger(traceIdx)) return;
+      draggingTraceIndex = traceIdx;
+      dropTargetTraceIndex = null;
+      dropTargetBefore = false;
+      skipNextRowClick = true;
+      row.classList.add('is-dragging');
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', String(traceIdx));
+      }
+    }
+
+    function onPinnedRowDragOver(e) {
+      if (!Number.isInteger(draggingTraceIndex)) return;
+      e.preventDefault();
+      const rowsContainer = pinnedHover?.querySelector?.('.ph-rows');
+      const row = e.target.closest?.('.ph-row');
+      if (!row) {
+        clearPinnedRowDragIndicators();
+        if (rowsContainer && rowsContainer.contains(e.target)) {
+          const rows = Array.from(rowsContainer.querySelectorAll('.ph-row'));
+          if (!rows.length) {
+            dropTargetTraceIndex = null;
+            dropTargetBefore = false;
+            return;
+          }
+          const containerRect = rowsContainer.getBoundingClientRect();
+          if (e.clientY <= containerRect.top) {
+            const first = rows[0];
+            first.classList.add('drag-over-top');
+            dropTargetTraceIndex = Number(first.dataset.index);
+            dropTargetBefore = true;
+            return;
+          }
+          if (e.clientY >= containerRect.bottom) {
+            const last = rows.at(-1);
+            last.classList.add('drag-over-bottom');
+            dropTargetTraceIndex = Number(last.dataset.index);
+            dropTargetBefore = false;
+            return;
+          }
+        }
+        dropTargetTraceIndex = null;
+        dropTargetBefore = false;
+        return;
+      }
+
+      const rect = row.getBoundingClientRect();
+      const dropBefore = (e.clientY - rect.top) < rect.height / 2;
+      clearPinnedRowDragIndicators();
+      row.classList.add(dropBefore ? 'drag-over-top' : 'drag-over-bottom');
+      dropTargetTraceIndex = Number(row.dataset.index);
+      dropTargetBefore = dropBefore;
+    }
+
+    function onPinnedRowDrop(e) {
+      if (!Number.isInteger(draggingTraceIndex)) return;
+      e.preventDefault();
+      const row = e.target.closest?.('.ph-row');
+      let targetTraceIdx = dropTargetTraceIndex;
+      let placeBefore = dropTargetBefore;
+
+      if (row) {
+        const rect = row.getBoundingClientRect();
+        placeBefore = (e.clientY - rect.top) < rect.height / 2;
+        targetTraceIdx = Number(row.dataset.index);
+      } else if (!Number.isInteger(targetTraceIdx)) {
+        const ordered = ensureChannelOrderIntegrity();
+        targetTraceIdx = ordered[ordered.length - 1];
+        placeBefore = false;
+      }
+
+      clearPinnedRowDragIndicators();
+
+      if (Number.isInteger(targetTraceIdx)) {
+        reorderChannelOrder(draggingTraceIndex, targetTraceIdx, placeBefore);
+      } else {
+        reorderChannelOrder(draggingTraceIndex, undefined, false);
+      }
+
+      draggingTraceIndex = null;
+      dropTargetTraceIndex = null;
+      dropTargetBefore = false;
+    }
+
+    function onPinnedRowDragEnd() {
+      clearPinnedRowDragIndicators();
+      draggingTraceIndex = null;
+      dropTargetTraceIndex = null;
+      dropTargetBefore = false;
+      setTimeout(() => { skipNextRowClick = false; }, 0);
+    }
+
+    function onPinnedRowDragLeave(e) {
+      if (!Number.isInteger(draggingTraceIndex)) return;
+      const row = e.target.closest?.('.ph-row');
+      if (!row) return;
+      row.classList.remove('drag-over-top', 'drag-over-bottom');
+    }
+
+    // === CSV & SAMPLE HELPERS ===
+
+    function makeSampleFromLivePayload(payload) {
+      const timestampStr = payload.timestamp || payload.t;
+      const channels = Array.isArray(payload.channels) ? payload.channels : [];
+      const timestamp = new Date(timestampStr);
+
+      const v = [];
+      const vis = [];
+
+      for (let i = 0; i < tracesCount; i++) {
+        const ch = channels[i];
+
+        if (ch) {
+          if (ch.name) {
+            channelNames[i] = ch.name;
+          }
+          const value = typeof ch.value === 'number' && Number.isFinite(ch.value)
+            ? ch.value
+            : null;
+          v.push(value);
+          vis.push(!!ch.visible);
+        } else {
+          v.push(null);
+          vis.push(false);
+        }
+      }
+
+      return { timestamp, v, vis };
+    }
+
+    function buildSamplesFromCsvRows(rows) {
+      const samples = [];
+      for (const row of rows) {
+        const cols = row.split(',').map(c => c.trim());
+        if (!cols.length) continue;
+
+        const ts = new Date(cols[0]);
+        if (Number.isNaN(ts.getTime())) continue;
+
+        const v = [];
+        const vis = [];
+        let idx = 1;
+
+        for (let i = 0; i < tracesCount; i++) {
+          const value = parseFloat(cols[idx++]);
+          const visibleStr = cols[idx++];
+          v.push(Number.isFinite(value) ? value : null);
+          vis.push(visibleStr === "TRUE");
+        }
+
+        samples.push({ timestamp: ts, v, vis });
+      }
+      return samples;
+    }
+
+    // === CSV INITIAL LOAD ===
+    async function loadInitialCSV(retries = 3, delay = 1000) {
+      stopLivePlot(); // avoid overlapping intervals while we rebuild
+      try {
+        showLoading("Loading historical data...");
+        const resp = await fetch(`${API}/historical.csv`, { cache: 'no-store' });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const csvText = await resp.text();
+        const rows = csvText.trim().split(/\r?\n/);
+
+        // how many samples are needed for the current time window?
+        const samplesNeeded = Math.floor(timeWindow / SAMPLE_PERIOD_MS);
+        let useRows = rows;
+        if (Number.isFinite(samplesNeeded) && samplesNeeded > 0 && rows.length > samplesNeeded) {
+          useRows = rows.slice(rows.length - samplesNeeded);
+        }
+
+        const samples = buildSamplesFromCsvRows(useRows);
+
+        dataBuffer = [];
+        if (samples.length > 0) {
+          lastTimestamp = samples[samples.length - 1].timestamp;
+        }
+
+        initialisePlotFromSamples(samples);
+        hideLoading();
+        startLivePlot();
+      } catch (e) {
+        if (retries > 0) setTimeout(() => loadInitialCSV(retries - 1, delay), delay);
+        else showLoading(`Failed to load history after retries: ${e.message}`);
+      }
+    }
+
+    // === LIVE FETCHING ===
+    async function fetchLiveJSON() {
+      if (liveUpdatesPaused) return;
+      try {
+        const resp = await fetch(`${API}/live`, { cache: 'no-store' });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+        const payload = await resp.json();
+        const sample = makeSampleFromLivePayload(payload);
+
+        if (!lastTimestamp || sample.timestamp > lastTimestamp) {
+          dataBuffer.push(sample);
+          lastTimestamp = sample.timestamp;
+        }
+
+        if (Array.isArray(sample.vis)) {
+          applyServerVisibility(sample.vis);
+          refreshPinnedForCurrentMode();
+        }
+      } catch (e) {
+        console.error('Live JSON fetch error:', e);
+      }
+    }
+
+    // === APPLY SERVER VISIBILITY with USER OVERRIDES ===
+    function applyServerVisibility(serverVis) {
+      try {
+        if (!chartDiv?.data || !chartDiv.data.length) return;
+
+        if (!currentVis.length) currentVis = chartDiv.data.map((tr) => tr.visible === undefined || tr.visible === true);
+        if (!userOverride.length) userOverride = Array(tracesCount).fill(undefined);
+
+        const showIdx = [];
+        const hideIdx = [];
+
+        for (let i = 0; i < Math.min(tracesCount, serverVis.length); i++) {
+          const serverWantsInPanel = !!serverVis[i];
+
+          if (!serverWantsInPanel) {
+            if (currentVis[i] !== false) hideIdx.push(i);
+            currentVis[i] = false;
+            userOverride[i] = undefined;
+            continue;
+          }
+
+          if (userOverride[i] === true) {
+            if (currentVis[i] !== true) showIdx.push(i);
+            currentVis[i] = true;
+          } else if (userOverride[i] === false) {
+            if (currentVis[i] !== false) hideIdx.push(i);
+            currentVis[i] = false;
+          } else {
+            if (currentVis[i] !== true) showIdx.push(i);
+            currentVis[i] = true;
+          }
+        }
+
+        const ops = [];
+        if (showIdx.length) ops.push(Plotly.restyle(chartDiv, { visible: true }, showIdx));
+        if (hideIdx.length) ops.push(Plotly.restyle(chartDiv, { visible: false }, hideIdx));
+
+        serverVisMask = serverVis.slice();
+
+        if (ops.length) Promise.all(ops).then(() => {
+          refreshPinnedForCurrentMode();
+          if (measurementModeActive) updateMeasurementOverlay();
+        });
+        else {
+          refreshPinnedForCurrentMode();
+          if (measurementModeActive) updateMeasurementOverlay();
+        }
+      } catch (e) {
+        console.error('applyServerVisibility error:', e);
+      }
+    }
+
+    // === POINT MANAGEMENT HELPERS ===
+    function decimateBuffer(buffer, stride) {
+      if (stride <= 1 || buffer.length <= 2) return buffer;
+      const result = [];
+      for (let i = 0; i < buffer.length; i += stride) {
+        result.push(buffer[i]);
+      }
+      if (result[result.length - 1] !== buffer[buffer.length - 1]) {
+        result.push(buffer[buffer.length - 1]);
+      }
+      return result;
+    }
+
+    function renderBufferedData() {
+      if (dataBuffer.length) {
+        const stride = Math.ceil(dataBuffer.length / MAX_POINTS_PER_FLUSH);
+        const flush = decimateBuffer(dataBuffer, stride);
+        const latest = flush.at(-1);
+
+        const xs = flush.map(d => d.timestamp);
+        const updateX = [];
+        const updateY = [];
+        const indices = [];
+
+        for (let i = 0; i < tracesCount; i++) {
+          indices.push(i);
+          updateX.push(xs);
+          updateY.push(flush.map(d => d.v[i]));
+        }
+
+        if (indices.length) {
+          // cap total history per trace to the same as historical.csv
+          Plotly.extendTraces(chartDiv, { x: updateX, y: updateY }, indices, MAX_POINTS);
+        }
+
+        const now = Date.now();
+        if (now - lastRelayout > RELAYOUT_INTERVAL) {
+          const endTime = latest.timestamp;
+          const startTime = new Date(endTime - timeWindow);
+          const rangeMs = [startTime.getTime(), endTime.getTime()];
+          let realigned = false;
+          if (measurementModeActive && !liveUpdatesPaused) {
+            realigned = applyMeasurementAnchorsToRange(rangeMs);
+            if (realigned) updateMeasurementAnchorsFromCursors(rangeMs);
+            skipAnchorSnapOnNextRelayout = realigned;
+          }
+          Plotly.relayout(chartDiv, { 'xaxis.range': [startTime, endTime] })
+            .then(() => {
+              if (measurementModeActive) {
+                if (realigned) {
+                  syncMeasurementShapes();
+                } else {
+                  updateMeasurementAnchorsFromCursors(rangeMs);
+                  updateMeasurementOverlay();
+                  updateMeasurementHandles();
+                }
+              }
+              skipAnchorSnapOnNextRelayout = false;
+            })
+            .catch(() => { skipAnchorSnapOnNextRelayout = false; });
+          lastRelayout = now;
+        }
+
+        if (latest.vis && Array.isArray(latest.vis)) {
+          applyServerVisibility(latest.vis);
+        }
+
+        dataBuffer = [];
+      }
+
+      // lighter pinned update
+      if (isPointerOverChart && lastHoverTime) {
+        softUpdatePinnedForTime(lastHoverTime);
+      } else {
+        softUpdatePinnedForTime(getLatestTime());
+      }
+    }
+
+    function startLivePlot() {
+      stopLivePlot();
+      liveInterval = setInterval(fetchLiveJSON, 100);
+      renderInterval = setInterval(renderBufferedData, RENDER_INTERVAL);
+    }
+    function stopLivePlot() {
+      clearInterval(liveInterval);
+      clearInterval(renderInterval);
+    }
+
+    // === PLOTTING ===
+    function initialisePlotFromSamples(samples) {
+      const xData = Array.from({ length: tracesCount }, () => []);
+      const yData = Array.from({ length: tracesCount }, () => []);
+      const visibility = Array.from({ length: tracesCount }, () => true);
+
+      samples.forEach(sample => {
+        lastTimestamp = sample.timestamp;
+        for (let i = 0; i < tracesCount; i++) {
+          yData[i].push(sample.v[i]);
+          visibility[i] = sample.vis[i];
+          xData[i].push(sample.timestamp);
+        }
+      });
+
+      const traces = buildPlotTraces(xData, yData, visibility);
+      const layout = buildPlotLayout();
+
+      currentVis = visibility.slice();
+      serverVisMask = visibility.slice();
+      userOverride = Array(tracesCount).fill(undefined);
+      lastBuiltMaskKey = maskKey(serverVisMask);
+
+      Plotly.newPlot(chartDiv, traces, layout, { responsive: true, displayModeBar: false, scrollZoom: true })
+        .then(() => {
+          attachHoverHandlers();
+          const endTime = lastTimestamp || getLatestTime();
+          if (endTime instanceof Date && !Number.isNaN(endTime.getTime())) {
+            const startTime = new Date(endTime.getTime() - timeWindow);
+            return Plotly.relayout(chartDiv, { 'xaxis.range': [startTime, endTime] });
+          }
+        })
+        .then(() => {
+          updatePinnedToLatest(true);
+          if (measurementModeActive) {
+            ensureMeasurementCursors();
+            syncMeasurementShapes();
+          }
+        })
+        .catch(() => {});
+    }
+
+    function buildPlotTraces(xData, yData, visibility) {
+      const groups = [...new Set(Object.values(groupMap).filter(Boolean))];
+      const groupToAxis = Object.fromEntries(groups.map((g, i) => [g, i === 0 ? 'y' : `y${i + 1}`]));
+
+      return channelNames.map((name, i) => {
+        const group = groupMap[name];
+        const axis = groupToAxis[group] || 'y';
+        return {
+          x: xData[i],
+          y: yData[i],
+          mode: 'lines',
+          type: 'scattergl',        // WebGL
+          hoverinfo: 'none',
+          name,
+          visible: visibility[i],
+          line: {
+            width: 2,
+            color: colorsMap[name] || '#888',
+            dash: lineStyleGroup[name] || '-',
+            simplify: false
+          },
+          opacity: 1,
+          fill: 'none',
+          yaxis: axis
+        };
+      });
+    }
+
+    function buildPlotLayout() {
+      const layout = {
+        showlegend: false,
+        hovermode: 'x unified',
+        hoverinfo: 'none',
+        hoverlabel: {
+          namelength: -1,
+          bgcolor: 'rgba(0,0,0,0)',
+          bordercolor: 'rgba(0,0,0,0)',
+          font: { color: 'rgba(0,0,0,0)' }
+        },
+        xaxis: { title: 'Time', color: '#fff', tickfont: { color: '#fff' }, gridcolor: '#444', spikecolor: '#fff' },
+        plot_bgcolor: '#222', paper_bgcolor: '#111', legend: { font: { color: '#fff' } }, margin: { l: 60, r: 0, b: 80, t: 0 }
+      };
+      const groups = [...new Set(Object.values(groupMap).filter(Boolean))];
+      groups.forEach((group, i) => {
+        const axisKey = i === 0 ? 'yaxis' : `yaxis${i + 1}`;
+        layout[axisKey] = {
+          ...(axisConfig[group] || { autorange: true }),
+          title: group,
+          color: '#fff',
+          tickfont: { color: '#fff' },
+          gridcolor: '#444',
+          ...(i === 0 ? {} : { overlaying: 'y', visible: false })
+        };
+      });
+      return layout;
+    }
+
+    function attachHoverHandlers() {
+      if (typeof chartDiv.removeListener === 'function') {
+        chartDiv.removeListener('plotly_hover', onPlotHover);
+        chartDiv.removeListener('plotly_unhover', onPlotUnhover);
+        chartDiv.removeListener('plotly_relayout', onPlotRelayout);
+      }
+      chartDiv.on('plotly_hover', onPlotHover);
+      chartDiv.on('plotly_unhover', onPlotUnhover);
+      chartDiv.on('plotly_relayout', onPlotRelayout);
+    }
+
+    function onPlotHover(event) {
+      if (!event?.points?.length) return;
+      isPointerOverChart = true;
+      clearUnhoverTimer();
+
+      const baseDate = event.points[0].x instanceof Date ? event.points[0].x : new Date(event.points[0].x);
+      lastHoverTime = baseDate instanceof Date && !Number.isNaN(baseDate.getTime()) ? baseDate : null;
+      refreshPinnedForCurrentMode();
+    }
+
+    function onPlotUnhover() {
+      scheduleUnhoverClear();
+    }
+
+    function onPlotRelayout(eventData) {
+      if (!measurementModeActive) return;
+      if (eventData && Object.keys(eventData).some(k => k.startsWith('shapes['))) {
+        captureMeasurementCursorsFromLayout();
+        updateMeasurementOverlay();
+        updateMeasurementHandles();
+        return;
+      }
+      if (eventData && (eventData['xaxis.range[0]'] || eventData['xaxis.range[1]'] || Object.prototype.hasOwnProperty.call(eventData, 'xaxis.range'))) {
+        if (skipAnchorSnapOnNextRelayout) {
+          skipAnchorSnapOnNextRelayout = false;
+          return;
+        }
+        const range = getCurrentXRange();
+        if (!liveUpdatesPaused && measurementCursorAnchors && applyMeasurementAnchorsToRange(range)) {
+          syncMeasurementShapes();
+          return;
+        }
+        updateMeasurementAnchorsFromCursors(range);
+        updateMeasurementOverlay();
+        updateMeasurementHandles();
+        return;
+      }
+      updateMeasurementHandles();
+    }
+
+    // === VISIBILITY & HIGHLIGHT HELPERS ===
+    function getTraceVisible(i) {
+      const v = chartDiv.data?.[i]?.visible;
+      return v === undefined || v === true;
+    }
+
+    function toggleTraceVisibility(i) {
+      if (serverVisMask && serverVisMask[i] === false) return;
+      const newVisible = !getTraceVisible(i);
+      userOverride[i] = newVisible;
+      Plotly.restyle(chartDiv, { visible: newVisible }, [i]).then(() => {
+        currentVis[i] = newVisible;
+        softUpdatePinnedForTime(lastHoverTime || getLatestTime());
+        if (measurementModeActive) updateMeasurementOverlay();
+      });
+    }
+
+    function hexToRgba(hex, alpha=0.2) {
+      if (!hex) return `rgba(255,255,255,${alpha})`;
+      const m = hex.replace('#','');
+      const bigint = parseInt(m.length===3 ? m.split('').map(ch=>ch+ch).join('') : m, 16);
+      const r = (bigint >> 16) & 255, g = (bigint >> 8) & 255, b = bigint & 255;
+      return `rgba(${r},${g},${b},${alpha})`;
+    }
+
+    function toggleHighlight(i) {
+      if (highlighted.has(i)) highlighted.delete(i);
+      else highlighted.add(i);
+      softUpdatePinnedForTime(lastHoverTime || getLatestTime());
+      if (measurementModeActive) updateMeasurementOverlay();
+    }
+
+    function soloHighlight(i) {
+      highlighted.clear();
+      highlighted.add(i);
+      softUpdatePinnedForTime(lastHoverTime || getLatestTime());
+      if (measurementModeActive) updateMeasurementOverlay();
+    }
+
+    // === PANEL HTML BUILD ===
+    function buildPinnedHoverContentForTime(time) {
+      const t = (time instanceof Date) ? time : new Date(time);
+      const timeText = formatTimeForHeader(t);
+
+      const orderedIndices = ensureChannelOrderIntegrity();
+      const rows = orderedIndices.map((traceIdx) => {
+        const name = channelNames[traceIdx];
+        if (!name) return '';
+        if (serverVisMask && serverVisMask.length && !serverVisMask[traceIdx]) return '';
+
+        const trace = chartDiv.data?.[traceIdx];
+        const color = trace?.line?.color || colorsMap[name] || '#fff';
+        const isDotted = (lineStyleGroup[name] === 'dot');
+        const isShownLocally = getTraceVisible(traceIdx);
+
+        const value = sampleTraceValueAt(traceIdx, t);
+        const valueStr = formatHoverValue(value);
+        const unit = CHANNEL_UNITS_MAP[name] || '';
+        const unitSpan = unit ? `<span style="opacity:0.8; font-size:0.95rem; margin-left:0.25rem;">${unit}</span>` : '';
+
+        const strokeColor = isShownLocally ? color : '#6b7280';
+        const active = highlighted.has(traceIdx);
+
+        return `
+          <div class="ph-row ${isShownLocally ? '' : 'is-hidden'} ${active ? 'is-highlighted' : ''}" data-index="${traceIdx}" draggable="true" title="Click to toggle visibility">
+            <div class="ph-label" style="font-size:1.25rem;">
+              <span data-role="stroke" style="display:inline-block; width:32px; height:0; border-top:4px ${isDotted ? 'dotted' : 'solid'} ${strokeColor}; flex-shrink:0;"></span>
+              <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${name}</span>
+              <button class="ph-star" type="button" aria-label="Highlight channel" data-active="${active ? 'true':'false'}" title="Highlight (Ctrl/Cmd-click to solo)">
+                <svg viewBox="0 0 24 24" fill="${active ? 'gold' : 'none'}" stroke="currentColor" stroke-width="1.6">
+                  <path d="M12 17.27 18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/>
+                </svg>
+              </button>
+            </div>
+            <div class="ph-value" style="width:100%; font-size:1.45rem; font-variant-numeric:tabular-nums; display:flex; align-items:baseline; justify-content:flex-start; gap:0.25rem; text-align:left;">
+              <span data-role="val">${valueStr}</span>${unitSpan}
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      const content = rows.trim() ? rows : `<div class="ph-empty">No channels enabled by server.</div>`;
+      const resetDisabled = isDefaultChannelOrder() ? 'disabled' : '';
+      return `<div class="ph-time"><span data-role="time-text">${timeText}</span><button class="btn btn-compact ph-reset" type="button" ${resetDisabled}>Reset</button></div><div class="ph-rows">${content}</div>`;
+    }
+
+    function formatTimeForHeader(time) {
+      if (time instanceof Date && !Number.isNaN(time.getTime())) return time.toLocaleString(undefined, { hour12: false });
+      const maybeDate = new Date(time);
+      if (!Number.isNaN(maybeDate.getTime())) return maybeDate.toLocaleString(undefined, { hour12: false });
+      return String(time ?? '');
+    }
+
+    function sampleTraceValueAt(i, time) {
+      try {
+        const trace = chartDiv.data?.[i];
+        if (!trace || !trace.x || !trace.y || !trace.x.length) return null;
+        const target = (time instanceof Date) ? time.getTime() : new Date(time).getTime();
+        if (!Number.isFinite(target)) return null;
+        const xs = trace.x; const ys = trace.y;
+        let lo = 0, hi = xs.length - 1;
+        const getMs = (idx) => (xs[idx] instanceof Date ? xs[idx].getTime() : new Date(xs[idx]).getTime());
+        if (target <= getMs(lo)) return ys[lo];
+        if (target >= getMs(hi)) return ys[hi];
+        while (lo <= hi) {
+          const mid = (lo + hi) >> 1; const tMid = getMs(mid);
+          if (tMid === target) return ys[mid];
+          if (tMid < target) lo = mid + 1; else hi = mid - 1;
+        }
+        const tLo = getMs(lo), tHi = getMs(hi);
+        return Math.abs(tLo - target) < Math.abs(tHi - target) ? ys[lo] : ys[hi];
+      } catch { return null; }
+    }
+
+    function formatHoverValue(value) {
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        return value.toFixed(1);
+      }
+      return value == null ? '—' : String(value);
+    }
+
+    // === MEASUREMENT OVERLAY / CURSORS ===
+    function ensureMeasurementOverlaySections() {
+      if (!measurementOverlay) return null;
+      let header = measurementOverlay.querySelector('.measurement-header');
+      let meta = measurementOverlay.querySelector('.measurement-meta');
+      let rows = measurementOverlay.querySelector('.measurement-rows');
+      if (!header || !meta || !rows) {
+        measurementOverlay.innerHTML = `
+          <div class="measurement-header">Cursor Measurements</div>
+          <div class="measurement-meta"></div>
+          <div class="measurement-rows"></div>
+        `;
+        header = measurementOverlay.querySelector('.measurement-header');
+        meta = measurementOverlay.querySelector('.measurement-meta');
+        rows = measurementOverlay.querySelector('.measurement-rows');
+      }
+      if (measurementRowsEl !== rows) {
+        if (measurementRowsEl) {
+          measurementRowsEl.removeEventListener('scroll', onMeasurementRowsScroll);
+        }
+        measurementRowsEl = rows;
+        measurementRowsEl.addEventListener('scroll', onMeasurementRowsScroll, { passive: true });
+      }
+      return { header, meta, rows };
+    }
+
+    function onMeasurementRowsScroll() {
+      if (!measurementRowsEl) return;
+      measurementRowsScrollTop = measurementRowsEl.scrollTop;
+      measurementRowsScrollHeight = measurementRowsEl.scrollHeight;
+      measurementRowsClientHeight = measurementRowsEl.clientHeight;
+    }
+
+    function rememberMeasurementRowsScrollState() {
+      if (!measurementRowsEl) return;
+      measurementRowsScrollTop = measurementRowsEl.scrollTop;
+      measurementRowsScrollHeight = measurementRowsEl.scrollHeight;
+      measurementRowsClientHeight = measurementRowsEl.clientHeight;
+    }
+
+    function restoreMeasurementRowsScrollState() {
+      if (!measurementRowsEl) return;
+      const maxScroll = Math.max(0, measurementRowsEl.scrollHeight - measurementRowsEl.clientHeight);
+      let target = Math.min(maxScroll, Math.max(0, measurementRowsScrollTop));
+      const prevMax = Math.max(0, measurementRowsScrollHeight - measurementRowsClientHeight);
+      if (prevMax > 0 && maxScroll > 0) {
+        const ratio = Math.min(1, Math.max(0, measurementRowsScrollTop / prevMax));
+        target = Math.min(maxScroll, Math.round(ratio * maxScroll));
+      }
+      measurementRowsEl.scrollTop = target;
+      measurementRowsScrollTop = target;
+      measurementRowsScrollHeight = measurementRowsEl.scrollHeight;
+      measurementRowsClientHeight = measurementRowsEl.clientHeight;
+    }
+
+    function setMeasurementOverlayMessage(message) {
+      const sections = ensureMeasurementOverlaySections();
+      if (!sections) return;
+      sections.meta.innerHTML = '';
+      sections.rows.innerHTML = `<div class="measurement-empty">${message}</div>`;
+      sections.rows.scrollTop = 0;
+      measurementRowsScrollTop = 0;
+      measurementRowsScrollHeight = sections.rows.scrollHeight;
+      measurementRowsClientHeight = sections.rows.clientHeight;
+    }
+
+    function enableMeasurementMode() {
+      measurementModeActive = true;
+      skipAnchorSnapOnNextRelayout = false;
+      measurementOverlay.classList.remove('hidden');
+      updatePinnedHoverConstraints();
+      if (!chartDiv?.data || !chartDiv.data.length) {
+        measurementCursorAnchors = null;
+        setMeasurementOverlayMessage('Chart data not loaded yet.');
+        updatePinnedHoverConstraints();
+        return;
+      }
+      if (!resetMeasurementCursorsToViewQuartiles()) {
+        ensureMeasurementCursors();
+      }
+      ensureMeasurementHandleLayer();
+      updateMeasurementHandles();
+      syncMeasurementShapes();
+      updateMeasurementOverlay();
+      updateMeasurementToggleButton();
+    }
+
+    function disableMeasurementMode() {
+      measurementModeActive = false;
+      measurementOverlay.classList.add('hidden');
+      measurementEditRevision += 1;
+      updatePinnedHoverConstraints();
+      destroyMeasurementHandleLayer();
+      measurementCursorAnchors = null;
+      skipAnchorSnapOnNextRelayout = false;
+      if (chartDiv?.layout) {
+        Plotly.relayout(chartDiv, {
+          shapes: [],
+          editrevision: measurementEditRevision,
+          'edits.shapePosition': false
+        });
+      }
+      updateMeasurementToggleButton();
+    }
+
+    function ensureMeasurementHandleLayer() {
+      if (measurementHandleLayer || !chartDiv) return;
+      measurementHandleLayer = document.createElement('div');
+      measurementHandleLayer.className = 'measurement-handle-layer';
+      measurementHandleElements = MEASUREMENT_HANDLE_COLORS.map((color, idx) => {
+        const handle = document.createElement('div');
+        handle.className = 'measurement-handle';
+        handle.dataset.index = String(idx);
+        handle.style.setProperty('--cursor-color', color);
+        handle.addEventListener('pointerdown', onMeasurementHandlePointerDown);
+        measurementHandleLayer.appendChild(handle);
+        return handle;
+      });
+      chartDiv.appendChild(measurementHandleLayer);
+    }
+
+    function destroyMeasurementHandleLayer() {
+      if (measurementHandleDrag) {
+        const { index, pointerId } = measurementHandleDrag;
+        const activeHandle = measurementHandleElements[index];
+        if (activeHandle) {
+          activeHandle.classList.remove('is-dragging');
+          if (typeof pointerId === 'number' && typeof activeHandle.releasePointerCapture === 'function') {
+            try { activeHandle.releasePointerCapture(pointerId); } catch (err) {}
+          }
+        }
+        window.removeEventListener('pointermove', onMeasurementHandlePointerMove);
+        window.removeEventListener('pointerup', onMeasurementHandlePointerUp);
+        if (measurementHandleLayer) measurementHandleLayer.classList.remove('is-dragging');
+        measurementHandleDrag = null;
+      }
+      if (measurementHandleElements && measurementHandleElements.length) {
+        measurementHandleElements.forEach(handle => {
+          if (!handle) return;
+          handle.removeEventListener('pointerdown', onMeasurementHandlePointerDown);
+        });
+      }
+      if (measurementHandleLayer && measurementHandleLayer.parentElement) {
+        measurementHandleLayer.parentElement.removeChild(measurementHandleLayer);
+      }
+      measurementHandleLayer = null;
+      measurementHandleElements = [];
+    }
+
+    function updateMeasurementHandles() {
+      if (!measurementModeActive) {
+        if (measurementHandleLayer) measurementHandleLayer.style.display = 'none';
+        return;
+      }
+      ensureMeasurementHandleLayer();
+      if (!measurementHandleLayer) return;
+      const fullLayout = chartDiv?._fullLayout;
+      if (!fullLayout) {
+        measurementHandleLayer.style.display = 'none';
+        return;
+      }
+      measurementHandleLayer.style.display = 'block';
+      const range = getCurrentXRange();
+      if (!measurementCursors || measurementCursors.length < 2 || !range) {
+        measurementHandleElements.forEach(handle => {
+          if (handle) handle.style.transform = 'translate(-9999px, -9999px)';
+        });
+        return;
+      }
+      const [start, end] = range;
+      const span = end - start;
+      if (!Number.isFinite(span) || span <= 0) {
+        measurementHandleElements.forEach(handle => {
+          if (handle) handle.style.transform = 'translate(-9999px, -9999px)';
+        });
+        return;
+      }
+      const size = fullLayout._size || {};
+      const plotLeft = Number.isFinite(size.l) ? size.l : 0;
+      const plotTop = Number.isFinite(size.t) ? size.t : 0;
+      const plotWidth = Number.isFinite(size.w) ? size.w : chartDiv.clientWidth;
+      const plotHeight = Number.isFinite(size.h) ? size.h : chartDiv.clientHeight;
+      const rect = chartDiv.getBoundingClientRect();
+      const containerHeight = rect.height || chartDiv.clientHeight || (plotTop + plotHeight);
+      const handleSize = 22;
+      const desiredBottom = plotTop + plotHeight + 18;
+      const maxBottom = containerHeight - handleSize / 2 - 4;
+      const minBottom = plotTop;
+      const bottom = Math.max(minBottom, Math.min(desiredBottom, maxBottom));
+      measurementHandleElements.forEach((handle, idx) => {
+        if (!handle) return;
+        const color = MEASUREMENT_HANDLE_COLORS[idx] || MEASUREMENT_HANDLE_COLORS[0];
+        handle.style.setProperty('--cursor-color', color);
+        const value = measurementCursors[idx];
+        if (!Number.isFinite(value)) {
+          handle.style.transform = 'translate(-9999px, -9999px)';
+          return;
+        }
+        const ratio = (value - start) / span;
+        const clamped = Math.max(0, Math.min(1, ratio));
+        const x = plotLeft + clamped * plotWidth;
+        handle.style.transform = `translate(${x - handleSize / 2}px, ${bottom - handleSize / 2}px)`;
+      });
+      updateMeasurementAnchorsFromCursors(range);
+    }
+
+    function onMeasurementHandlePointerDown(event) {
+      if (!measurementModeActive) return;
+      if (!(event?.currentTarget instanceof HTMLElement)) return;
+      event.preventDefault();
+      const idx = Number(event.currentTarget.dataset.index || '0');
+      measurementHandleDrag = { index: idx, pointerId: event.pointerId };
+      try { event.currentTarget.setPointerCapture(event.pointerId); } catch (err) {}
+      event.currentTarget.classList.add('is-dragging');
+      if (measurementHandleLayer) measurementHandleLayer.classList.add('is-dragging');
+      window.addEventListener('pointermove', onMeasurementHandlePointerMove);
+      window.addEventListener('pointerup', onMeasurementHandlePointerUp);
+    }
+
+    function onMeasurementHandlePointerMove(event) {
+      if (!measurementHandleDrag) return;
+      if (typeof event.pointerId === 'number' && event.pointerId !== measurementHandleDrag.pointerId) return;
+      const range = getCurrentXRange();
+      const fullLayout = chartDiv?._fullLayout;
+      if (!range || !fullLayout) return;
+      const [start, end] = range;
+      const span = end - start;
+      if (!Number.isFinite(span) || span <= 0) return;
+      const size = fullLayout._size || {};
+      const rect = chartDiv.getBoundingClientRect();
+      const plotLeft = rect.left + (Number.isFinite(size.l) ? size.l : 0);
+      const plotWidth = Number.isFinite(size.w) ? size.w : rect.width;
+      if (!Number.isFinite(plotWidth) || plotWidth <= 0) return;
+      event.preventDefault();
+      const rawRatio = (event.clientX - plotLeft) / plotWidth;
+      const clampedRatio = Math.max(0, Math.min(1, rawRatio));
+      let value = start + clampedRatio * span;
+      if (!measurementCursors || measurementCursors.length < 2) return;
+      const otherIdx = measurementHandleDrag.index === 0 ? 1 : 0;
+      const otherValue = measurementCursors[otherIdx];
+      if (measurementHandleDrag.index === 0 && Number.isFinite(otherValue)) {
+        value = Math.min(value, otherValue);
+      } else if (measurementHandleDrag.index === 1 && Number.isFinite(otherValue)) {
+        value = Math.max(value, otherValue);
+      }
+      measurementCursors[measurementHandleDrag.index] = value;
+      updateMeasurementOverlay();
+      updateMeasurementShapeDuringDrag(measurementHandleDrag.index, value);
+      updateMeasurementAnchorsFromCursors(range);
+    }
+
+    function onMeasurementHandlePointerUp(event) {
+      if (!measurementHandleDrag) return;
+      if (typeof event.pointerId === 'number' && event.pointerId !== measurementHandleDrag.pointerId) return;
+      event.preventDefault();
+      const { index, pointerId } = measurementHandleDrag;
+      const handle = measurementHandleElements[index];
+      if (handle) {
+        handle.classList.remove('is-dragging');
+        if (typeof pointerId === 'number') {
+          try { handle.releasePointerCapture(pointerId); } catch (err) {}
+        }
+      }
+      if (measurementHandleLayer) measurementHandleLayer.classList.remove('is-dragging');
+      window.removeEventListener('pointermove', onMeasurementHandlePointerMove);
+      window.removeEventListener('pointerup', onMeasurementHandlePointerUp);
+      measurementHandleDrag = null;
+      measurementEditRevision += 1;
+      syncMeasurementShapes();
+    }
+
+    function updateMeasurementShapeDuringDrag(index, value) {
+      if (!chartDiv?.layout?.shapes || chartDiv.layout.shapes.length < index + 1) return;
+      const payload = {};
+      const dateVal = new Date(value);
+      payload[`shapes[${index}].x0`] = dateVal;
+      payload[`shapes[${index}].x1`] = dateVal;
+      Plotly.relayout(chartDiv, payload).catch(() => {});
+    }
+
+    function ensureMeasurementCursors() {
+      if (measurementCursors && measurementCursors.length === 2) return;
+      const range = getCurrentXRange();
+      if (!range) return;
+      const [start, end] = range;
+      const span = end - start;
+      const first = start + span * 0.25;
+      const second = start + span * 0.75;
+      measurementCursors = [first, second];
+      measurementCursorAnchors = [0.25, 0.75];
+    }
+
+    function resetMeasurementCursorsToViewQuartiles() {
+      const range = getCurrentXRange();
+      if (!range) return false;
+      const [start, end] = range;
+      const span = end - start;
+      if (!Number.isFinite(span) || span <= 0) return false;
+      const first = start + span * 0.25;
+      const second = start + span * 0.75;
+      measurementCursors = [first, second];
+      measurementCursorAnchors = [0.25, 0.75];
+      return true;
+    }
+
+    function getCurrentXRange() {
+      const layoutRange = chartDiv?.layout?.xaxis?.range;
+      const fullRange = chartDiv?._fullLayout?.xaxis?.range;
+      const rng = (layoutRange && layoutRange.length === 2) ? layoutRange : fullRange;
+      if (!rng || rng.length !== 2) return null;
+      const start = (rng[0] instanceof Date) ? rng[0].getTime() : new Date(rng[0]).getTime();
+      const end = (rng[1] instanceof Date) ? rng[1].getTime() : new Date(rng[1]).getTime();
+      if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+      return [start, end];
+    }
+
+    function clamp01(value) {
+      const v = Number.isFinite(value) ? value : 0;
+      if (v <= 0) return 0;
+      if (v >= 1) return 1;
+      return v;
+    }
+
+    function updateMeasurementAnchorsFromCursors(rangeOverride = null) {
+      if (!measurementModeActive) return;
+      if (!measurementCursors || measurementCursors.length < 2) {
+        measurementCursorAnchors = null;
+        return;
+      }
+      const range = rangeOverride || getCurrentXRange();
+      if (!range) {
+        measurementCursorAnchors = null;
+        return;
+      }
+      const [start, end] = range;
+      const span = end - start;
+      if (!Number.isFinite(span) || span <= 0) {
+        measurementCursorAnchors = null;
+        return;
+      }
+      measurementCursorAnchors = measurementCursors.map(value => clamp01((value - start) / span));
+    }
+
+    function applyMeasurementAnchorsToRange(range) {
+      if (!range || range.length !== 2) return false;
+      if (!measurementCursorAnchors || measurementCursorAnchors.length < 2) return false;
+      const [start, end] = range;
+      const span = end - start;
+      if (!Number.isFinite(span) || span <= 0) return false;
+      const next = measurementCursorAnchors.map(anchor => start + clamp01(anchor) * span);
+      if (!measurementCursors || measurementCursors.length < 2) {
+        measurementCursors = next;
+        return true;
+      }
+      let changed = false;
+      measurementCursors = measurementCursors.map((value, idx) => {
+        const candidate = next[idx];
+        if (!Number.isFinite(value) || Math.abs(value - candidate) > 0.5) changed = true;
+        return candidate;
+      });
+      return changed;
+    }
+
+    function syncMeasurementShapes() {
+      if (!measurementModeActive || !measurementCursors || measurementCursors.length < 2) return;
+      if (!chartDiv?.layout) return;
+      const sorted = measurementCursors.slice().sort((a, b) => a - b);
+      measurementCursors = sorted;
+      updateMeasurementAnchorsFromCursors();
+      const shapes = sorted.map((x, idx) => ({
+        type: 'line',
+        xref: 'x',
+        yref: 'paper',
+        x0: new Date(x),
+        x1: new Date(x),
+        y0: 0,
+        y1: 1,
+        line: {
+          color: MEASUREMENT_HANDLE_COLORS[idx] || MEASUREMENT_HANDLE_COLORS[0],
+          width: 2,
+          dash: 'dash'
+        },
+        layer: 'above',
+        meta: 'measurement'
+      }));
+      measurementEditRevision += 1;
+      Plotly.relayout(chartDiv, {
+        shapes,
+        editrevision: measurementEditRevision,
+        'edits.shapePosition': true
+      }).then(() => {
+        updateMeasurementOverlay();
+        updateMeasurementHandles();
+      }).catch(() => {});
+    }
+
+    function captureMeasurementCursorsFromLayout() {
+      const shapes = (chartDiv?.layout?.shapes || []).filter(s => s?.meta === 'measurement');
+      if (!shapes.length) return;
+      const xs = shapes.map(s => {
+        const xVal = s?.x0 ?? s?.x1;
+        if (xVal instanceof Date) return xVal.getTime();
+        const parsed = new Date(xVal).getTime();
+        return Number.isFinite(parsed) ? parsed : null;
+      }).filter(v => Number.isFinite(v));
+      if (xs.length === 2) {
+        measurementCursors = xs.sort((a, b) => a - b);
+        updateMeasurementAnchorsFromCursors();
+        updateMeasurementHandles();
+      }
+    }
+
+    function updateMeasurementOverlay() {
+      if (!measurementModeActive) return;
+      updateMeasurementHandles();
+      if (!measurementCursors || measurementCursors.length < 2) {
+        ensureMeasurementCursors();
+      }
+      if (!measurementCursors || measurementCursors.length < 2) {
+        setMeasurementOverlayMessage('Move the cursors to analyse data.');
+        updatePinnedHoverConstraints();
+        return;
+      }
+      const [a, b] = measurementCursors;
+      const startMs = Math.min(a, b);
+      const endMs = Math.max(a, b);
+      if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) {
+        setMeasurementOverlayMessage('Unable to determine cursor positions.');
+        updatePinnedHoverConstraints();
+        return;
+      }
+      const startDate = new Date(startMs);
+      const endDate = new Date(endMs);
+      const deltaMs = Math.abs(endMs - startMs);
+
+      const sections = ensureMeasurementOverlaySections();
+      if (!sections) return;
+      rememberMeasurementRowsScrollState();
+      sections.meta.innerHTML = `
+        <div><span>A:</span> ${formatCursorTime(startDate)}</div>
+        <div><span>B:</span> ${formatCursorTime(endDate)}</div>
+        <div><span>Δt:</span> ${formatDuration(deltaMs)}</div>
+      `;
+      const rowsHtml = buildMeasurementRows(startMs, endMs);
+      sections.rows.innerHTML = rowsHtml;
+      restoreMeasurementRowsScrollState();
+      updatePinnedHoverConstraints();
+    }
+
+    function buildMeasurementRows(startMs, endMs) {
+      const rows = [];
+      const traces = chartDiv?.data || [];
+      for (let i = 0; i < traces.length; i++) {
+        if (!getTraceVisible(i)) continue;
+        const stats = computeTraceStatsBetween(traces[i], startMs, endMs);
+        if (!stats) continue;
+        const name = channelNames[i] || traces[i]?.name || `Trace ${i + 1}`;
+        const unit = CHANNEL_UNITS_MAP[name] || '';
+        const color = traces[i]?.line?.color || colorsMap[name] || '#ffffff';
+        const unitText = unit ? ` ${unit}` : '';
+        rows.push(`
+          <div class="measurement-row">
+            <div class="measurement-row-title">
+              <span style="background:${color};"></span>
+              <div>${name}</div>
+            </div>
+            <div class="measurement-stats">
+              <div class="measurement-stat"><div class="measurement-stat-label">Avg</div><div>${formatMeasurementNumber(stats.average)}${unitText}</div></div>
+              <div class="measurement-stat"><div class="measurement-stat-label">Δ</div><div>${formatMeasurementNumber(stats.delta)}${unitText}</div></div>
+              <div class="measurement-stat"><div class="measurement-stat-label">Min</div><div>${formatMeasurementNumber(stats.min)}${unitText}</div></div>
+              <div class="measurement-stat"><div class="measurement-stat-label">Max</div><div>${formatMeasurementNumber(stats.max)}${unitText}</div></div>
+            </div>
+          </div>
+        `);
+      }
+      if (!rows.length) {
+        return '<div class="measurement-empty">No visible traces contain data between the cursors.</div>';
+      }
+      return rows.join('');
+    }
+
+    function computeTraceStatsBetween(trace, startMs, endMs) {
+      try {
+        const xs = trace?.x;
+        const ys = trace?.y;
+        if (!xs || !ys || xs.length !== ys.length || !xs.length) return null;
+        let sum = 0;
+        let count = 0;
+        let min = Infinity;
+        let max = -Infinity;
+        let firstValue = null;
+        let lastValue = null;
+        for (let idx = 0; idx < xs.length; idx++) {
+          let t = xs[idx];
+          if (t instanceof Date) t = t.getTime();
+          else t = new Date(t).getTime();
+          if (!Number.isFinite(t)) continue;
+          if (t < startMs) continue;
+          if (t > endMs) break;
+          const val = ys[idx];
+          if (typeof val !== 'number' || !Number.isFinite(val)) continue;
+          if (firstValue === null) firstValue = val;
+          lastValue = val;
+          sum += val;
+          count += 1;
+          if (val < min) min = val;
+          if (val > max) max = val;
+        }
+        if (!count) return null;
+        return {
+          average: sum / count,
+          delta: (lastValue != null && firstValue != null) ? (lastValue - firstValue) : null,
+          min,
+          max
+        };
+      } catch (e) {
+        console.error('computeTraceStatsBetween error', e);
+        return null;
+      }
+    }
+
+    function formatMeasurementNumber(value) {
+      if (typeof value === 'number' && Number.isFinite(value)) return value.toFixed(1);
+      return '—';
+    }
+
+    function formatDuration(ms) {
+      if (!Number.isFinite(ms)) return '—';
+      if (ms < 1000) return `${ms.toFixed(0)} ms`;
+      const totalSeconds = ms / 1000;
+      if (totalSeconds < 60) return `${totalSeconds.toFixed(2)} s`;
+      const minutes = Math.floor(totalSeconds / 60);
+      const seconds = totalSeconds - minutes * 60;
+      if (minutes < 60) return `${minutes}m ${seconds.toFixed(1)}s`;
+      const hours = Math.floor(minutes / 60);
+      const remMinutes = minutes % 60;
+      return `${hours}h ${remMinutes}m ${seconds.toFixed(0)}s`;
+    }
+
+    function formatCursorTime(date) {
+      if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '—';
+      return new Intl.DateTimeFormat(undefined, {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        fractionalSecondDigits: 3,
+        hour12: false
+      }).format(date);
+    }
+  </script>
+</body>
+</html>

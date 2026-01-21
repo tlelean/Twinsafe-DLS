@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PDF Viewer</title>
+
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      background: #111;
+      overflow: hidden;
+    }
+
+    #viewer {
+      height: 100%;
+      width: 100%;
+      overflow: auto;
+      box-sizing: border-box;
+      padding: 0px;
+      position: relative;
+    }
+
+    #pages {
+      width: 100%;
+      position: relative;
+    }
+
+    canvas {
+      display: block;
+      margin: 0 auto;
+      user-select: none;
+      -webkit-user-select: none;
+      -ms-user-select: none;
+    }
+
+    .msg {
+      color: #fff;
+      font-family: sans-serif;
+      padding: 12px;
+      white-space: pre-wrap;
+    }
+
+    #clickLeft, #clickRight {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 50%;
+      z-index: 10;
+      background: transparent;
+      pointer-events: auto;
+    }
+    #clickLeft { left: 0; }
+    #clickRight { right: 0; }
+
+    #clickLeft:active, #clickRight:active {
+      background: rgba(255,255,255,0.03);
+    }
+  </style>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+</head>
+
+<body>
+  <div id="viewer">
+    <div id="pages">
+      <div id="clickLeft"  title="Fail (confirm)"></div>
+      <div id="clickRight" title="Pass"></div>
+    </div>
+  </div>
+
+  <script>
+    // -----------------------------
+    // Settings
+    // -----------------------------
+    const PDF_LIST_URL    = "/api/pdf-list";
+    const PDF_GET_BASE    = "/api/pdf";
+    const PDF_STATUS_BASE = "/api/pdf/status";   // POST /api/pdf/status/{unique}
+    const PDF_CLOSE_URL   = "/api/pdf-close/";   // POST when finished
+
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+    // -----------------------------
+    // Elements
+    // -----------------------------
+    const pagesDiv   = document.getElementById("pages");
+    const viewer     = document.getElementById("viewer");
+    const clickLeft  = document.getElementById("clickLeft");
+    const clickRight = document.getElementById("clickRight");
+
+    // -----------------------------
+    // State
+    // -----------------------------
+    let groupFiles = [];
+    let index = 0;
+    let currentPdf = null;
+    let currentFilename = null;
+    let renderToken = 0;
+
+    let lastW = 0;
+    let lastH = 0;
+    let rerenderPending = false;
+
+    let actionLocked = false; // prevents double-clicks while posting/navigating
+
+    // -----------------------------
+    // Helpers
+    // -----------------------------
+    function clearPages() {
+      const left = clickLeft;
+      const right = clickRight;
+
+      pagesDiv.innerHTML = "";
+      pagesDiv.appendChild(left);
+      pagesDiv.appendChild(right);
+    }
+
+    function showMessage(text) {
+      pagesDiv.innerHTML = `
+        <div class="msg">${text}</div>
+        <div id="clickLeft"  title="Fail (confirm)"></div>
+        <div id="clickRight" title="Pass"></div>
+      `;
+      // rebind events because we replaced innerHTML
+      const l = document.getElementById("clickLeft");
+      const r = document.getElementById("clickRight");
+      l.addEventListener("click", onLeftClick);
+      r.addEventListener("click", onRightClick);
+    }
+
+    function clearViewerCompletely() {
+      pagesDiv.innerHTML = "";
+      viewer.style.background = "transparent";
+      document.body.style.background = "transparent";
+    }
+
+    function timestampKey(filename) {
+      if (!filename || typeof filename !== "string") return null;
+
+      // Matches ..._<D-M-YYYY>_<H-M-S>.pdf allowing 1-2 digit parts and extra underscores
+      const m = filename.match(/_(\d{1,2}-\d{1,2}-\d{4})_+(\d{1,2}-\d{1,2}-\d{1,2})(?=\.pdf$)/i);
+      if (!m) return null;
+
+      // Normalise to ensure consistent grouping (pad to 2 digits where needed)
+      const [d, mo, y] = m[1].split("-").map(Number);
+      const [hh, mm, ss] = m[2].split("-").map(Number);
+
+      const dd = String(d).padStart(2, "0");
+      const mmo = String(mo).padStart(2, "0");
+      const HH = String(hh).padStart(2, "0");
+      const MM = String(mm).padStart(2, "0");
+      const SS = String(ss).padStart(2, "0");
+
+      return `${dd}-${mmo}-${y}_${HH}-${MM}-${SS}`;
+    }
+
+
+    function getUniqueFromFilename(filename) {
+      // first chunk before "_" e.g. "12_19-12-2025_14-14-16_x.pdf" -> "12"
+      if (!filename || typeof filename !== "string") return null;
+      const base = filename.split("/").pop();
+      const first = base.split("_")[0];
+      return first ? first.trim() : null;
+    }
+
+    function getViewerSize() {
+      return { w: viewer.clientWidth, h: viewer.clientHeight };
+    }
+
+    function scheduleRerender() {
+      if (rerenderPending) return;
+      rerenderPending = true;
+
+      setTimeout(() => {
+        rerenderPending = false;
+
+        const { w, h } = getViewerSize();
+        if (w < 50 || h < 50) return;
+
+        if (w === lastW && h === lastH) return;
+        lastW = w;
+        lastH = h;
+
+        requestAnimationFrame(() => requestAnimationFrame(renderToFit));
+      }, 120);
+    }
+
+    async function postStatusForCurrentPdf(isPassBool) {
+      const unique = getUniqueFromFilename(currentFilename);
+      if (!unique) throw new Error(`Could not parse unique number from filename: ${currentFilename}`);
+
+      const url = `${PDF_STATUS_BASE}/${encodeURIComponent(unique)}`;
+
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: !!isPassBool })
+      });
+
+      if (!res.ok) {
+        let detail = "";
+        try {
+          const j = await res.json();
+          detail = j?.detail ? `\n${j.detail}` : "";
+        } catch (_) {
+          const t = await res.text().catch(() => "");
+          if (t) detail = `\n${t}`;
+        }
+        throw new Error(`Status POST failed (${res.status}): ${res.statusText}${detail}`);
+      }
+    }
+
+    async function getStatusForFilename(filename) {
+      const unique = getUniqueFromFilename(filename);
+      if (!unique) return null;
+
+      const url = `${PDF_STATUS_BASE}/${encodeURIComponent(unique)}`;
+
+      const res = await fetch(url, { method: "GET" });
+      if (!res.ok) {
+        // If status read fails, don't block viewing
+        return null;
+      }
+
+      const j = await res.json().catch(() => ({}));
+      return (typeof j.status === "boolean") ? j.status : null; // true/false/null
+    }
+
+    async function skipFailsForward() {
+      while (index < groupFiles.length) {
+        const st = await getStatusForFilename(groupFiles[index]);
+        if (st !== false) return true;   // not FAIL => show it
+        // FAIL => skip displaying it
+        index++;
+      }
+      return false; // nothing left to show
+    }
+
+    async function postClosePdf() {
+      const res = await fetch(PDF_CLOSE_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" }
+      });
+
+      if (!res.ok) {
+        let detail = "";
+        try {
+          const j = await res.json();
+          detail = j?.detail ? `\n${j.detail}` : "";
+        } catch (_) {
+          const t = await res.text().catch(() => "");
+          if (t) detail = `\n${t}`;
+        }
+        throw new Error(`Close PDF POST failed (${res.status}): ${res.statusText}${detail}`);
+      }
+    }
+
+    // -----------------------------
+    // Rendering
+    // -----------------------------
+    async function renderToFit() {
+      if (!currentPdf) return;
+
+      const myToken = ++renderToken;
+
+      const { w, h } = getViewerSize();
+      if (w < 50 || h < 50) return;
+
+      clearPages();
+
+      const page = await currentPdf.getPage(1);
+      if (myToken !== renderToken) return;
+
+      const viewport0 = page.getViewport({ scale: 1 });
+
+      const availW = Math.max(1, w);
+      const availH = Math.max(1, h);
+
+      const scaleX = availW / viewport0.width;
+      const scaleY = availH / viewport0.height;
+      const scale  = Math.min(scaleX, scaleY);
+
+      const viewport = page.getViewport({ scale });
+
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
+
+      canvas.width  = Math.floor(viewport.width);
+      canvas.height = Math.floor(viewport.height);
+
+      pagesDiv.appendChild(canvas);
+
+      await page.render({ canvasContext: ctx, viewport }).promise;
+    }
+
+    // -----------------------------
+    // Loading
+    // -----------------------------
+    async function loadPdf(filename) {
+      currentFilename = filename;
+
+      const url = `${PDF_GET_BASE}/${encodeURIComponent(filename)}`;
+      currentPdf = await pdfjsLib.getDocument(url).promise;
+
+      requestAnimationFrame(() => requestAnimationFrame(renderToFit));
+    }
+
+    async function loadMostRecentGroup() {
+      const res = await fetch(PDF_LIST_URL);
+      if (!res.ok) throw new Error("Failed to fetch pdf list");
+
+      const data = await res.json();
+      const files = (data.files || [])
+        .filter(f => typeof f === "string" && f.toLowerCase().endsWith(".pdf"));
+
+      if (!files.length) throw new Error("No PDFs found");
+
+      const newest = files[0];
+      const key = timestampKey(newest);
+
+      if (!key) {
+        groupFiles = [newest];
+      } else {
+        groupFiles = files.filter(f => timestampKey(f) === key);
+        if (!groupFiles.length) groupFiles = [newest];
+      }
+
+      // Display oldest first within the chosen timestamp group
+      groupFiles.reverse();
+
+      // Start at first item, but skip any that are already FAIL
+      index = 0;
+      const ok = await skipFailsForward();
+
+      if (!ok) {
+        await postClosePdf();
+        clearViewerCompletely();
+        return;
+      }
+
+      await loadPdf(groupFiles[index]);
+    }
+
+    // -----------------------------
+    // Navigation
+    // -----------------------------
+    async function goPrev() {
+      if (index <= 0) return;
+      index--;
+      await loadPdf(groupFiles[index]);
+    }
+
+    async function goNext() {
+      index++;
+
+      const ok = await skipFailsForward();
+      if (ok) {
+        await loadPdf(groupFiles[index]);
+        return;
+      }
+
+      // END OF GROUP: tell PLC to close, then stop (do NOT loop)
+      await postClosePdf();
+      clearViewerCompletely();
+    }
+
+    // -----------------------------
+    // Click actions (PASS / FAIL)
+    // -----------------------------
+    async function onRightClick() {
+      if (actionLocked) return;
+      actionLocked = true;
+
+      try {
+        await postStatusForCurrentPdf(true); // PASS
+        await goNext();
+      } catch (err) {
+        console.error(err);
+        showMessage(String(err));
+      } finally {
+        actionLocked = false;
+      }
+    }
+
+    async function onLeftClick() {
+      if (actionLocked) return;
+
+      const ok = window.confirm("Mark this chart as FAIL and move to the next PDF?");
+      if (!ok) return;
+
+      actionLocked = true;
+
+      try {
+        await postStatusForCurrentPdf(false); // FAIL
+        await goNext();
+      } catch (err) {
+        console.error(err);
+        showMessage(String(err));
+      } finally {
+        actionLocked = false;
+      }
+    }
+
+    clickLeft.addEventListener("click", onLeftClick);
+    clickRight.addEventListener("click", onRightClick);
+
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowLeft") onLeftClick();
+      if (e.key === "ArrowRight") onRightClick();
+    });
+
+    const ro = new ResizeObserver(scheduleRerender);
+    ro.observe(viewer);
+    window.addEventListener("resize", scheduleRerender);
+
+    // -----------------------------
+    // Start
+    // -----------------------------
+    loadMostRecentGroup().catch(err => {
+      console.error(err);
+      showMessage(String(err));
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,30 @@
+# Ignore Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ignore virtual environments
+venv/
+env/
+.venv/
+.env/
+
+# VS Code settings (if you don’t want them in git)
+.vscode/
+
+# Byte-compiled / temporary files
+*.log
+*.tmp
+
+# Common Python tooling dirs
+.mypy_cache/
+.pytest_cache/
+.python-version
+coverage.xml
+htmlcov/
+
+# Build and distribution
+build/
+dist/
+*.egg-info/

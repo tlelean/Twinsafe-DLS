@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <!-- Tailwind bundle -->
+  <script src="/src/assets/tailwind.js"></script>
+  <link rel="stylesheet" href="/src/styles/main.css" />
+
+</head>
+
+<body class="body-styles flex flex-col h-screen">
+
+
+<!-- LEFT SIDE -->
+<div class="automation-column flex flex-col gap-4 min-h-0">
+
+  <!-- Search -->
+  <div class="panel flex items-center gap-3">
+    <input id="searchInput"
+           type="text"
+           placeholder="Search details..."
+           class="flex-1 bg-neutral-900 border border-neutral-600 rounded-md h-10 px-3 text-base outline-none focus:border-neutral-300" />
+    <button id="clearSearch"
+            class="btn h-10 px-4">
+      Clear
+    </button>
+  </div>
+
+  <!-- Details list -->
+  <div class="panel automation-panel flex flex-col flex-1 min-h-0">
+    <div class="flex items-center justify-between mb-3 text-sm uppercase tracking-wide opacity-70">
+      <span>Details</span>
+      <span id="detailsCount">0 items</span>
+    </div>
+
+    <div id="detailsList"
+         class="mt-1 space-y-1 overflow-y-auto scrollbar-thin flex-1 min-h-0">
+    </div>
+  </div>
+</div>
+
+<script>
+let allFiles = [];
+
+function renderList(files) {
+  const list = document.getElementById("detailsList");
+  const count = document.getElementById("detailsCount");
+
+  list.innerHTML = "";
+
+  files.forEach((file) => {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className =
+      "w-full text-left px-3 py-2 rounded bg-neutral-800 hover:bg-neutral-700 cursor-pointer";
+
+    // Display name without .bin (if present)
+    const displayName = file.toLowerCase().endsWith(".bin")
+      ? file.slice(0, -4)
+      : file;
+
+    item.textContent = displayName;
+
+    item.addEventListener("click", async () => {
+      try {
+        const res = await fetch("/api/details/select", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ filename: file }), // full name with .bin
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          alert(data?.detail || data?.error || "Failed to select file");
+          return;
+        }
+      } catch (e) {
+        alert("Failed to reach server");
+      }
+    });
+
+    list.appendChild(item);
+  });
+
+  count.textContent = `${files.length} items`;
+}
+
+
+function applySearch() {
+  const q = (document.getElementById("searchInput").value || "").trim().toLowerCase();
+  renderList(!q ? allFiles : allFiles.filter((n) => n.toLowerCase().includes(q)));
+}
+
+async function loadDetails() {
+  const res = await fetch("/api/details");
+  const data = await res.json();
+  allFiles = Array.isArray(data) ? data : [];
+  renderList(allFiles);
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  const input = document.getElementById("searchInput");
+  const clearBtn = document.getElementById("clearSearch");
+
+  input.addEventListener("input", applySearch);
+  clearBtn.addEventListener("click", () => {
+    input.value = "";
+    applySearch();
+    input.focus();
+  });
+
+  loadDetails();
+});
+</script>

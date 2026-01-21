@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Section Details</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root {
+      --field-height: 2.75rem;
+    }
+
+    .unified-h {
+      height: var(--field-height);
+      min-height: var(--field-height);
+      display: flex;
+      align-items: center;
+      font-size: 1.1rem;
+    }
+
+    textarea.unified-h {
+      resize: none;
+      line-height: 1.4;
+      padding-top: 0.6rem;
+      overflow: hidden;
+    }
+
+    .w-nav     { width: 50px; flex-shrink: 0; }
+    .w-section { width: 180px; flex-shrink: 0; }
+    .w-hold, .w-press { width: 160px; flex-shrink: 0; }
+    
+    .body-styles { 
+      background-color: rgb(39, 39, 39); 
+      color: #eee; 
+      padding: 20px; 
+    }
+  </style>
+</head>
+
+<body class="body-styles">
+  <main class="max-w-full">
+    <div class="flex gap-4 items-end">
+    
+    <div class="w-nav">
+        <button id="prevBtn" class="unified-h w-full bg-white/5 hover:bg-white/10 rounded-lg justify-center transition-colors disabled:opacity-20 text-white" disabled>&#10094;</button>
+    </div>
+
+    <div class="w-section">
+        <label class="block text-sm font-medium opacity-60 mb-2 ml-1">Section</label>
+        <input id="sectionInput" class="unified-h w-full bg-white/5 border border-white/10 rounded-lg px-3 focus:outline-none focus:border-blue-500 transition-all" type="text" placeholder="e.g. 6.4.2" autocomplete="off" disabled />
+    </div>
+
+    <div class="flex-1">
+        <label class="block text-sm font-medium opacity-60 mb-2 ml-1">Test Name</label>
+        <textarea id="testName" class="unified-h w-full bg-white/5 border border-white/10 rounded-lg px-3 focus:outline-none focus:border-blue-500" rows="1"></textarea>
+    </div>
+
+    <div class="w-hold">
+        <label class="block text-sm font-medium opacity-60 mb-2 ml-1">Hold (min)</label>
+        <input id="holdTime" class="unified-h w-full bg-white/5 border border-white/10 rounded-lg px-3 focus:outline-none focus:border-blue-500" type="text" />
+    </div>
+
+    <div class="w-press">
+        <label class="block text-sm font-medium opacity-60 mb-2 ml-1">Pressure</label>
+        <input id="testPressure" class="unified-h w-full bg-white/5 border border-white/10 rounded-lg px-3 focus:outline-none focus:border-blue-500" type="text" />
+    </div>
+
+    <div class="w-nav">
+        <button id="nextBtn" class="unified-h w-full bg-white/5 hover:bg-white/10 rounded-lg justify-center transition-colors disabled:opacity-20 text-white" disabled>&#10095;</button>
+    </div>
+
+    </div>
+  </main>
+
+<script>
+let currentOts = "";
+let sectionsList = []; 
+let currentIndex = -1;
+
+const els = {
+  sectionInput: document.getElementById("sectionInput"),
+  testName: document.getElementById("testName"),
+  holdTime: document.getElementById("holdTime"),
+  testPressure: document.getElementById("testPressure"),
+  prevBtn: document.getElementById("prevBtn"),
+  nextBtn: document.getElementById("nextBtn"),
+};
+
+function autoGrow(el){
+  if(!el) return;
+  el.style.height = "var(--field-height)";
+  if(el.scrollHeight > 44) {
+    el.style.height = el.scrollHeight + "px";
+  }
+}
+
+async function apiGet(url){
+  const r = await fetch(url);
+  if(!r.ok) throw new Error("API Error");
+  return r.json();
+}
+
+function parseSectionParts(s){
+  return String(s).trim().split(".").map(p => {
+    const n = Number(p);
+    return Number.isFinite(n) && p !== "" ? n : p.toLowerCase();
+  });
+}
+
+function sectionCompare(a, b){
+  const A = parseSectionParts(a), B = parseSectionParts(b);
+  const L = Math.max(A.length, B.length);
+  for(let i=0; i<L; i++){
+    if(i >= A.length) return -1;
+    if(i >= B.length) return 1;
+    if(typeof A[i] === "number" && typeof B[i] === "number"){
+      if(A[i] !== B[i]) return A[i] - B[i];
+    } else if (String(A[i]) !== String(B[i])) {
+      return String(A[i]) < String(B[i]) ? -1 : 1;
+    }
+  }
+  return 0;
+}
+
+function updateNavButtons(){
+  // Buttons are enabled as long as we have a list to cycle through
+  const hasList = sectionsList.length > 0;
+  els.prevBtn.disabled = !hasList;
+  els.nextBtn.disabled = !hasList;
+}
+
+async function loadSection(){
+  const sec = els.sectionInput.value.trim();
+  if(!sec || !currentOts) return;
+  try {
+    const data = await apiGet(`/api/logs/${encodeURIComponent(currentOts)}/section/${encodeURIComponent(sec)}`);
+    const m = data.matches?.[0];
+    els.testName.value = m?.test_name || "";
+    els.holdTime.value = m?.hold_time_minutes ?? "";
+    els.testPressure.value = m?.test_pressure ?? "";
+    autoGrow(els.testName);
+    updateNavButtons();
+  } catch (err) {
+    updateNavButtons();
+  }
+}
+
+async function loadFullSectionList(){
+  try {
+    const data = await apiGet(`/api/logs/${encodeURIComponent(currentOts)}/sections?limit=500`);
+    const list = (data.sections || []).map(s => (s.section_number || "").trim()).filter(Boolean);
+    sectionsList = Array.from(new Set(list)).sort(sectionCompare);
+    updateNavButtons();
+  } catch {
+    sectionsList = [];
+    updateNavButtons();
+  }
+}
+
+async function loadOtsFromOpc(){
+  try {
+    const data = await apiGet("/api/details/ots");
+    const ots = (data.ots_number || "").trim();
+    if(ots !== currentOts){
+      currentOts = ots;
+      els.sectionInput.disabled = !currentOts;
+      if(currentOts) loadFullSectionList();
+    }
+  } catch {}
+}
+
+function goRelative(delta){
+  if (sectionsList.length === 0) return;
+  
+  const val = els.sectionInput.value.trim();
+  currentIndex = sectionsList.indexOf(val);
+  
+  let nextIdx = currentIndex + delta;
+
+  // Looping Logic
+  if (nextIdx >= sectionsList.length) {
+    nextIdx = 0; // Go to start
+  } else if (nextIdx < 0) {
+    nextIdx = sectionsList.length - 1; // Go to end
+  }
+  
+  els.sectionInput.value = sectionsList[nextIdx];
+  loadSection();
+}
+
+els.sectionInput.onkeydown = (e) => { if(e.key === "Enter") loadSection(); };
+els.sectionInput.onblur = () => loadSection();
+els.prevBtn.onclick = () => goRelative(-1);
+els.nextBtn.onclick = () => goRelative(1);
+els.testName.oninput = () => autoGrow(els.testName);
+
+loadOtsFromOpc();
+setInterval(loadOtsFromOpc, 2000);
+</script>
+</body>
+</html>
