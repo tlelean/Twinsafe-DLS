@@ -193,6 +193,20 @@ class OpcUaWrapper:
                 node, _ = self._get_node_entry(key)
                 return node.get_value()
 
+    def read_direct(self, nodeid: str):
+        """
+        Read a value directly by node ID (not using NODE_IDS mapping).
+        """
+        with self._lock:
+            try:
+                node = self.client.get_node(nodeid)
+                return node.get_value()
+            except FuturesTimeoutError:
+                logger.warning("OPC: Timeout on read_direct '%s', reconnecting and retrying", nodeid)
+                self._reconnect()
+                node = self.client.get_node(nodeid)
+                return node.get_value()
+
     def write(self, key: str, value: Any) -> None:
         """
         Write a value by logical key.

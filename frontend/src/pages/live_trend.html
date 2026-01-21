@@ -141,13 +141,10 @@
 
     const API = '/api';
 
-    // 27-channel layout matching your CODESYS / OPC list
+    // 9-channel layout matching your CODESYS / OPC list
     const defaultChannelNames = [
-      "Upstream","Downstream","Body","Actuator","Hyperbaric","Backseat",
-      "Spring Chamber","Primary Stem Seal","Secondary Stem Seal","Relief Port","BX Port","Flow Meter",
-      "Mass Spectrometer Mantissa","Mass Spectrometer","LVDT","Torque","Number Of Turns","Motor Speed",
-      "Ambient Temperature","Body Temperature","Monitor Temperature","Chamber Temperature","Hyperbaric Water Temperature",
-      "Close","Open","Cycle Count"
+      "Channel 1","Channel 2","Channel 3","Channel 4","Channel 5",
+      "Channel 6","Channel 7","Channel 8","Ambient Temperature"
     ];
 
     const tracesCount = defaultChannelNames.length;
@@ -158,35 +155,20 @@
     let channelOrder = defaultChannelOrder.slice();
 
     const colorsMap = {
-      'Upstream': '#FF0000','Downstream': '#00B050','Body': '#FFA500','Actuator': '#FFFFFF','Hyperbaric': '#0000FF',
-      'Backseat': '#00FFFF','Spring Chamber': '#FF00FF','Primary Stem Seal': '#80FF00','Secondary Stem Seal': '#400080',
-      'Relief Port': '#008080','BX Port': '#800000','Flow Meter': '#808000','Mass Spectrometer Mantissa': '#FF66CC',
-      'Mass Spectrometer': '#66B2FF','LVDT': '#99FF33','Torque': '#663300','Number Of Turns': '#00FFAA',
-      'Motor Speed': '#336699','Ambient Temperature': '#0000FF','Body Temperature': '#00B050',
-      'Monitor Temperature': '#FFA500','Chamber Temperature': '#FFFFFF','Hyperbaric Water Temperature': '#FF0000',
-      'Close': '#00FFFF','Open': '#FF00FF','Cycle Count': '#80FF00',
+      'Channel 1': '#FF0000','Channel 2': '#00B050','Channel 3': '#FFA500','Channel 4': '#FFFFFF','Channel 5': '#0000FF',
+      'Channel 6': '#00FFFF','Channel 7': '#FF00FF','Channel 8': '#80FF00','Ambient Temperature': '#0000FF',
     };
 
     const lineStyleGroup = {
-      'Upstream': '-','Downstream': '-','Body': '-','Actuator': '-','Hyperbaric': '-','Backseat': '-',
-      'Spring Chamber': '-','Primary Stem Seal': '-','Secondary Stem Seal': '-','Relief Port': '-','BX Port': '-',
-      'Flow Meter': '-','Mass Spectrometer Mantissa': '-','Mass Spectrometer': '-','LVDT': '-','Torque': '-',
-      'Number Of Turns': '-','Motor Speed': '-','Ambient Temperature': 'dot','Body Temperature': 'dot',
-      'Monitor Temperature': 'dot','Chamber Temperature': 'dot','Hyperbaric Water Temperature': 'dot','Close': 'dot',
-      'Open': 'dot','Cycle Count': 'dot',
+      'Channel 1': '-','Channel 2': '-','Channel 3': '-','Channel 4': '-','Channel 5': '-','Channel 6': '-',
+      'Channel 7': '-','Channel 8': '-','Ambient Temperature': '-',
     };
 
     const groupMap = {
-      "Upstream": "Pressure", "Downstream": "Pressure", "Body": "Pressure", "Actuator": "Pressure",
-      "Hyperbaric": "Pressure", "Backseat": "Pressure", "Spring Chamber": "Pressure",
-      "Primary Stem Seal": "Pressure", "Secondary Stem Seal": "Pressure", "Relief Port": "Pressure",
-      "BX Port": "Pressure", "Flow Meter": "Flow Meter",
-      "Mass Spectrometer Mantissa": "Mass Spectrometer", "Mass Spectrometer": "Mass Spectrometer",
-      "LVDT": "LVDT", "Torque": "Torque", "Number Of Turns": "Number Of Turns", "Motor Speed": "Motor Speed",
-      "Ambient Temperature": "Temperature", "Body Temperature": "Temperature",
-      "Monitor Temperature": "Temperature", "Chamber Temperature": "Temperature",
-      "Hyperbaric Water Temperature": "Temperature", "Close": "Valve State", "Open": "Valve State",
-      "Cycle Count": "Cycle Count"
+      "Channel 1": "Channel Data", "Channel 2": "Channel Data", "Channel 3": "Channel Data",
+      "Channel 4": "Channel Data", "Channel 5": "Channel Data", "Channel 6": "Channel Data",
+      "Channel 7": "Channel Data", "Channel 8": "Channel Data",
+      "Ambient Temperature": "Temperature",
     };
 
     const axisConfig = {
@@ -195,12 +177,8 @@
     };
 
     const CHANNEL_UNITS_MAP = {
-      'Upstream': 'psi','Downstream': 'psi','Body': 'psi','Actuator': 'psi','Hyperbaric': 'psi','Backseat': 'psi',
-      'Spring Chamber': 'psi','Primary Stem Seal': 'psi','Secondary Stem Seal': 'psi','Relief Port': 'psi',
-      'BX Port': 'psi','Flow Meter': 'ml/min','Mass Spectrometer Mantissa': 'mbarl/sec','Mass Spectrometer': 'mbarl/sec',
-      'LVDT': 'mm','Torque': 'lbs-ft','Number Of Turns': '','Motor Speed': 'rpm','Ambient Temperature': '°C',
-      'Body Temperature': '°C','Monitor Temperature': '°C','Chamber Temperature': '°C','Hyperbaric Water Temperature': '°C',
-      'Close': '','Open': '','Cycle Count': ''
+      'Channel 1': 'units','Channel 2': 'units','Channel 3': 'units','Channel 4': 'units','Channel 5': 'units','Channel 6': 'units',
+      'Channel 7': 'units','Channel 8': 'units','Ambient Temperature': '°C',
     };
 
     // === INIT ===

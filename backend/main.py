@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from .config import FRONTEND_DIR, PDF_DIR
-from .pages import live_trend, pdf_viewer, test_details_production
+from .pages import live_trend, pdf_viewer, test_details
 
 app = FastAPI()
 
@@ -17,7 +17,7 @@ app.add_middleware(
 # Page-specific routers
 app.include_router(live_trend.router)
 app.include_router(pdf_viewer.router)
-app.include_router(test_details_production.router)
+app.include_router(test_details.router)
 
 # Static / frontend
 app.mount("/static", StaticFiles(directory=str(PDF_DIR.parent)), name="static")
