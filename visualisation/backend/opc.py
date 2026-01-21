@@ -75,7 +75,7 @@ class OpcUaWrapper:
 
         # 🔑 Teach the client about custom structs / ExtensionObjects
         try:
-            self.client.load_data_type_definitions()
+            self.client.load_type_definitions()
             logger.info("OPC: Loaded data type definitions")
         except Exception:
             logger.exception("OPC: Failed to load data type definitions")

@@ -4,9 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
   <title>Trend Viewer – Live Mode</title>
-  <script src="/src/assets/plotly-latest.min.js"></script>
-  <script src="/src/assets/tailwind.js"></script>
-  <link rel="stylesheet" href="/src/styles/main.css" />
+  <script src="../assets/plotly-latest.min.js"></script>
+  <script src="../assets/tailwind.js"></script>
+  <link rel="stylesheet" href="../styles/main.css" />
 
 </head>
 <body class="body-styles flex flex-col h-screen">
@@ -163,15 +163,15 @@
     };
 
     const groupMap = {
-      "Channel 1": "Channel Data", "Channel 2": "Channel Data", "Channel 3": "Channel Data",
-      "Channel 4": "Channel Data", "Channel 5": "Channel Data", "Channel 6": "Channel Data",
-      "Channel 7": "Channel Data", "Channel 8": "Channel Data",
-      "Ambient Temperature": "Temperature",
+      "Channel 1": "Pressure (psi)", "Channel 2": "Pressure (psi)", "Channel 3": "Pressure (psi)",
+      "Channel 4": "Pressure (psi)", "Channel 5": "Pressure (psi)", "Channel 6": "Pressure (psi)",
+      "Channel 7": "Pressure (psi)", "Channel 8": "Pressure (psi)",
+      "Ambient Temperature": "Temperature (°C)",
     };
 
     const axisConfig = {
-      "Pressure": { rangemode: 'tozero', autorange: true },
-      "Temperature": { range: [-60, 260], autorange: false },
+      "Pressure (psi)": { rangemode: 'tozero', autorange: true },
+      "Temperature (°C)": { range: [-60, 260], autorange: false },
     };
 
     const CHANNEL_UNITS_MAP = {
