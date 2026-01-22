@@ -66,6 +66,9 @@ class Layout:
 
     FOOTER_TEXT_Y = 10
 
+    MAIN_TITLE_X = 315
+    MAIN_TITLE_Y = 500
+
     HEADER_COL1_LABEL_X = 20
     HEADER_COL1_VALUE_X = 140
     HEADER_COL2_LABEL_X = 402.5
@@ -196,12 +199,10 @@ def draw_headers(pdf, test_metadata, light_blue):
     draw_text_on_pdf(
         pdf,
         test_metadata.get('Test Name', ''),
-        Layout.HEADER_COL1_VALUE_X,
-        Layout.HEADER_ROW1_Y,
+        Layout.MAIN_TITLE_X,
+        Layout.MAIN_TITLE_Y,
         font="Helvetica-Bold",
-        colour=light_blue,
-        size=14,
-        left_aligned=True,
+        size=16,
     )
     draw_text_on_pdf(
         pdf, 

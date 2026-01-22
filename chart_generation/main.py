@@ -51,7 +51,7 @@ def main():
             test_details_file=args.test_details_file,
             pdf_output_path=Path(args.pdf_output_path),
         )
-        print("Report generation completed successfully.")
+        print("Done")
     except Exception as exc:
         print(f"Error: {exc}")
         raise

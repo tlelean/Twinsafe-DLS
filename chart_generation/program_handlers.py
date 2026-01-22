@@ -1,6 +1,7 @@
 """Production chart report generator."""
 
 from pathlib import Path
+import shutil
 from typing import List
 import pandas as pd
 
@@ -17,6 +18,7 @@ class BaseReportGenerator:
         self.active_channels = kwargs.get("active_channels")
         self.cleaned_data = kwargs.get("cleaned_data")
         self.channel_info = kwargs.get("channel_info")
+        self.pdf_copy_dir = Path("/var/opt/codesys/PlcLogic/trend_data/static/pdfs")
 
         if isinstance(self.test_metadata, pd.DataFrame):
             self.test_metadata = self.test_metadata.iloc[:, 0].to_dict()
@@ -47,7 +49,20 @@ class BaseReportGenerator:
             return final_path
 
         temp_path.replace(final_path)
+        self.copy_pdf(final_path)
         return final_path
+    
+    def copy_pdf(self, pdf_path: Path) -> None:
+        """Copy the generated PDF to the configured copy directory."""
+        if not pdf_path.exists():
+            return
+
+        self.pdf_copy_dir.mkdir(parents=True, exist_ok=True)
+        destination = self.pdf_copy_dir / pdf_path.name
+        if destination.resolve() == pdf_path.resolve():
+            return
+
+        shutil.copy2(pdf_path, destination)
 
     def generate(self) -> List[Path]:
         """Generate the report."""

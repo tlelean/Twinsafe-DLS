@@ -27,6 +27,10 @@ NODE_IDS: Dict[str, str] = {
     "close_pdf": "ns=4;s=|var|CODESYS Control for Linux ARM64 SL.DLS.GVL.xClosePdf",
     "filename_details_production": "ns=4;s=|var|CODESYS Control for Linux ARM64 SL.DLS.GVL.sFileNameDetailsProduction",
     "ots_number": "ns=4;s=|var|CODESYS Control for Linux ARM64 SL.DLS.GVL.asTestDetails[2,1]",
+    "section_number": "ns=4;s=|var|CODESYS Control for Linux ARM64 SL.DLS.GVL.sSectionNumber",
+    "test_name": "ns=4;s=|var|CODESYS Control for Linux ARM64 SL.DLS.GVL.sTestName",
+    "hold_period": "ns=4;s=|var|CODESYS Control for Linux ARM64 SL.DLS.GVL.iHoldPeriod",
+    "test_pressure": "ns=4;s=|var|CODESYS Control for Linux ARM64 SL.DLS.GVL.iTestPressure",
 }
 
 UNIQUE_NUMBER_NODE_IDS: Dict[int, str] = {

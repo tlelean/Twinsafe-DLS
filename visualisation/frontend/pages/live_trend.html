@@ -134,7 +134,7 @@
 
     // sampling / history (matches your CSV)
     const SAMPLE_PERIOD_MS = 100;       // 100 ms logging
-    const MAX_POINTS = 30000;           // max rows in historical.csv
+    const MAX_POINTS = 36000;           // max rows in historical.csv
     const MAX_POINTS_PER_FLUSH = 150;   // max new samples per render tick
 
     const API = '/api';
@@ -152,32 +152,38 @@
     const defaultChannelOrder = Array.from({ length: tracesCount }, (_, i) => i);
     let channelOrder = defaultChannelOrder.slice();
 
-    const colorsMap = {
-      'Channel 1': '#FF0000','Channel 2': '#00B050','Channel 3': '#FFA500','Channel 4': '#FFFFFF','Channel 5': '#0000FF',
-      'Channel 6': '#00FFFF','Channel 7': '#FF00FF','Channel 8': '#80FF00','Ambient Temperature': '#0000FF',
-    };
+    const COLORS_BY_INDEX = [
+      '#FF0000',
+      '#00B050',
+      '#FFA500',
+      '#FFFFFF',
+      '#0000FF',
+      '#00FFFF',
+      '#FF00FF',
+      '#80FF00',
+      '#0000FF'
+    ];
 
-    const lineStyleGroup = {
-      'Channel 1': '-','Channel 2': '-','Channel 3': '-','Channel 4': '-','Channel 5': '-','Channel 6': '-',
-      'Channel 7': '-','Channel 8': '-','Ambient Temperature': '-',
-    };
+    const LINE_STYLE_BY_INDEX = ['-', '-', '-', '-', '-', '-', '-', '-', '-'];
 
-    const groupMap = {
-      "Channel 1": "Pressure (psi)", "Channel 2": "Pressure (psi)", "Channel 3": "Pressure (psi)",
-      "Channel 4": "Pressure (psi)", "Channel 5": "Pressure (psi)", "Channel 6": "Pressure (psi)",
-      "Channel 7": "Pressure (psi)", "Channel 8": "Pressure (psi)",
-      "Ambient Temperature": "Temperature (°C)",
-    };
+    const GROUP_BY_INDEX = [
+      'Pressure (psi)',
+      'Pressure (psi)',
+      'Pressure (psi)',
+      'Pressure (psi)',
+      'Pressure (psi)',
+      'Pressure (psi)',
+      'Pressure (psi)',
+      'Pressure (psi)',
+      'Temperature (°C)'
+    ];
 
     const axisConfig = {
       "Pressure (psi)": { rangemode: 'tozero', autorange: true },
       "Temperature (°C)": { range: [-60, 260], autorange: false },
     };
 
-    const CHANNEL_UNITS_MAP = {
-      'Channel 1': 'units','Channel 2': 'units','Channel 3': 'units','Channel 4': 'units','Channel 5': 'units','Channel 6': 'units',
-      'Channel 7': 'units','Channel 8': 'units','Ambient Temperature': '°C',
-    };
+    const UNITS_BY_INDEX = ['psi', 'psi', 'psi', 'psi', 'psi', 'psi', 'psi', 'psi', '°C'];
 
     // === INIT ===
     document.addEventListener('DOMContentLoaded', () => {
@@ -420,7 +426,7 @@
         const strokeEl = row.querySelector('span[data-role="stroke"]');
         if (strokeEl) {
           const trace = chartDiv.data?.[i];
-          const baseColor = trace?.line?.color || colorsMap[channelNames[i]] || '#fff';
+          const baseColor = trace?.line?.color || COLORS_BY_INDEX[i] || '#fff';
           const strokeColor = shown ? baseColor : '#6b7280';
           strokeEl.style.borderTopColor = strokeColor;
         }
@@ -430,7 +436,7 @@
         const star = row.querySelector('.ph-star');
         if (star) star.setAttribute('data-active', active ? 'true' : 'false');
         const trace = chartDiv.data?.[i];
-        const color = trace?.line?.color || colorsMap[channelNames[i]] || '#fff';
+        const color = trace?.line?.color || COLORS_BY_INDEX[i] || '#fff';
         row.style.background = active ? hexToRgba(color, 0.28) : '';
         row.style.boxShadow = active ? `0 0 0 1px ${hexToRgba(color, 0.5)}, 0 0 14px ${hexToRgba(color, 0.35)}` : '';
       }
@@ -930,11 +936,11 @@
     }
 
     function buildPlotTraces(xData, yData, visibility) {
-      const groups = [...new Set(Object.values(groupMap).filter(Boolean))];
+      const groups = [...new Set(GROUP_BY_INDEX.filter(Boolean))];
       const groupToAxis = Object.fromEntries(groups.map((g, i) => [g, i === 0 ? 'y' : `y${i + 1}`]));
 
       return channelNames.map((name, i) => {
-        const group = groupMap[name];
+        const group = GROUP_BY_INDEX[i] || 'Pressure (psi)';
         const axis = groupToAxis[group] || 'y';
         return {
           x: xData[i],
@@ -946,8 +952,8 @@
           visible: visibility[i],
           line: {
             width: 2,
-            color: colorsMap[name] || '#888',
-            dash: lineStyleGroup[name] || '-',
+            color: COLORS_BY_INDEX[i] || '#888',
+            dash: LINE_STYLE_BY_INDEX[i] || '-',
             simplify: false
           },
           opacity: 1,
@@ -971,7 +977,7 @@
         xaxis: { title: 'Time', color: '#fff', tickfont: { color: '#fff' }, gridcolor: '#444', spikecolor: '#fff' },
         plot_bgcolor: '#222', paper_bgcolor: '#111', legend: { font: { color: '#fff' } }, margin: { l: 60, r: 0, b: 80, t: 0 }
       };
-      const groups = [...new Set(Object.values(groupMap).filter(Boolean))];
+      const groups = [...new Set(GROUP_BY_INDEX.filter(Boolean))];
       groups.forEach((group, i) => {
         const axisKey = i === 0 ? 'yaxis' : `yaxis${i + 1}`;
         layout[axisKey] = {
@@ -1088,13 +1094,13 @@
         if (serverVisMask && serverVisMask.length && !serverVisMask[traceIdx]) return '';
 
         const trace = chartDiv.data?.[traceIdx];
-        const color = trace?.line?.color || colorsMap[name] || '#fff';
-        const isDotted = (lineStyleGroup[name] === 'dot');
+        const color = trace?.line?.color || COLORS_BY_INDEX[traceIdx] || '#fff';
+        const isDotted = (LINE_STYLE_BY_INDEX[traceIdx] === 'dot');
         const isShownLocally = getTraceVisible(traceIdx);
 
         const value = sampleTraceValueAt(traceIdx, t);
         const valueStr = formatHoverValue(value);
-        const unit = CHANNEL_UNITS_MAP[name] || '';
+        const unit = UNITS_BY_INDEX[traceIdx] || '';
         const unitSpan = unit ? `<span style="opacity:0.8; font-size:0.95rem; margin-left:0.25rem;">${unit}</span>` : '';
 
         const strokeColor = isShownLocally ? color : '#6b7280';
@@ -1615,8 +1621,8 @@
         const stats = computeTraceStatsBetween(traces[i], startMs, endMs);
         if (!stats) continue;
         const name = channelNames[i] || traces[i]?.name || `Trace ${i + 1}`;
-        const unit = CHANNEL_UNITS_MAP[name] || '';
-        const color = traces[i]?.line?.color || colorsMap[name] || '#ffffff';
+        const unit = UNITS_BY_INDEX[i] || '';
+        const color = traces[i]?.line?.color || COLORS_BY_INDEX[i] || '#ffffff';
         const unitText = unit ? ` ${unit}` : '';
         rows.push(`
           <div class="measurement-row">
