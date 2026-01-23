@@ -88,6 +88,11 @@
     let lastTimestamp = null;
     let lastRelayout = 0;
 
+    // Master history for efficient calculations and decimation
+    let masterTimestamps = []; // stores epoch ms
+    let masterValues = [];     // Array of arrays
+    const MAX_HISTORY_POINTS = 864000; // 24 hours at 100ms
+
     // Hover state
     let lastHoverTime = null;
     let isPointerOverChart = false;
@@ -132,6 +137,18 @@
     const RENDER_INTERVAL = 500;
     const RELAYOUT_INTERVAL = 500;
 
+    // === UTILS ===
+    function findIndexBinary(arr, target) {
+      let low = 0, high = arr.length - 1;
+      while (low <= high) {
+        const mid = (low + high) >>> 1;
+        if (arr[mid] < target) low = mid + 1;
+        else if (arr[mid] > target) high = mid - 1;
+        else return mid;
+      }
+      return low;
+    }
+
     // sampling / history (matches your CSV)
     const SAMPLE_PERIOD_MS = 100;       // 100 ms logging
     const MAX_POINTS = 36000;           // max rows in historical.csv
@@ -148,6 +165,9 @@
     const tracesCount = defaultChannelNames.length;
 
     let channelNames = defaultChannelNames.slice();
+
+    // Initialize masterValues
+    masterValues = Array.from({ length: tracesCount }, () => []);
 
     const defaultChannelOrder = Array.from({ length: tracesCount }, (_, i) => i);
     let channelOrder = defaultChannelOrder.slice();
@@ -358,6 +378,16 @@
     }
 
     // === PINNED PANEL RENDERING ===
+    let pinnedUpdatePending = false;
+    function requestPinnedUpdate(force = false) {
+      if (pinnedUpdatePending && !force) return;
+      pinnedUpdatePending = true;
+      requestAnimationFrame(() => {
+        refreshPinnedForCurrentMode(force);
+        pinnedUpdatePending = false;
+      });
+    }
+
     function setPinnedContent(html, force = false) {
       const now = performance.now();
       if (!force && (now - lastPinnedRenderAt) < PINNED_REFRESH_MS) return;
@@ -706,14 +736,8 @@
         const csvText = await resp.text();
         const rows = csvText.trim().split(/\r?\n/);
 
-        // how many samples are needed for the current time window?
-        const samplesNeeded = Math.floor(timeWindow / SAMPLE_PERIOD_MS);
-        let useRows = rows;
-        if (Number.isFinite(samplesNeeded) && samplesNeeded > 0 && rows.length > samplesNeeded) {
-          useRows = rows.slice(rows.length - samplesNeeded);
-        }
-
-        const samples = buildSamplesFromCsvRows(useRows);
+        // Load all available rows from historical.csv to support viewing larger windows/history
+        const samples = buildSamplesFromCsvRows(rows);
 
         dataBuffer = [];
         if (samples.length > 0) {
@@ -746,7 +770,7 @@
 
         if (Array.isArray(sample.vis)) {
           applyServerVisibility(sample.vis);
-          refreshPinnedForCurrentMode();
+          requestPinnedUpdate();
         }
       } catch (e) {
         console.error('Live JSON fetch error:', e);
@@ -806,6 +830,93 @@
     }
 
     // === POINT MANAGEMENT HELPERS ===
+    function getDecimatedData(targetPoints = 2000) {
+      const range = getCurrentXRange();
+      if (!range || !masterTimestamps.length) return null;
+      const [viewStart, viewEnd] = range;
+
+      let startIdx = findIndexBinary(masterTimestamps, viewStart);
+      let endIdx = findIndexBinary(masterTimestamps, viewEnd);
+
+      // Padding for smoother scrolling/panning edges
+      startIdx = Math.max(0, startIdx - 50);
+      endIdx = Math.min(masterTimestamps.length - 1, endIdx + 50);
+
+      const tracesData = [];
+      for (let i = 0; i < tracesCount; i++) {
+        const d = decimateTrace(masterTimestamps, masterValues[i], startIdx, endIdx, targetPoints);
+        tracesData.push(d);
+      }
+      return tracesData;
+    }
+
+    function decimateTrace(tsFull, ysFull, startIdx, endIdx, targetPoints) {
+      const numInRange = endIdx - startIdx + 1;
+      if (numInRange <= targetPoints) {
+        const x = [];
+        const y = [];
+        for (let i = startIdx; i <= endIdx; i++) {
+          x.push(new Date(tsFull[i]));
+          y.push(ysFull[i]);
+        }
+        return { x, y };
+      }
+
+      const stride = Math.floor(numInRange / (targetPoints / 2));
+      const resultX = [];
+      const resultY = [];
+
+      for (let i = startIdx; i <= endIdx; i += stride) {
+        const bucketEnd = Math.min(i + stride, endIdx + 1);
+        let minVal = Infinity;
+        let maxVal = -Infinity;
+        let minIdx = i;
+        let maxIdx = i;
+
+        for (let j = i; j < bucketEnd; j++) {
+          const val = ysFull[j];
+          if (val == null) continue;
+          if (val < minVal) { minVal = val; minIdx = j; }
+          if (val > maxVal) { maxVal = val; maxIdx = j; }
+        }
+
+        if (minIdx < maxIdx) {
+          resultX.push(new Date(tsFull[minIdx])); resultY.push(ysFull[minIdx]);
+          resultX.push(new Date(tsFull[maxIdx])); resultY.push(ysFull[maxIdx]);
+        } else if (minIdx > maxIdx) {
+          resultX.push(new Date(tsFull[maxIdx])); resultY.push(ysFull[maxIdx]);
+          resultX.push(new Date(tsFull[minIdx])); resultY.push(ysFull[minIdx]);
+        } else {
+          resultX.push(new Date(tsFull[minIdx])); resultY.push(ysFull[minIdx]);
+        }
+      }
+      return { x: resultX, y: resultY };
+    }
+
+    let decimateUpdatePending = false;
+    function updateChartDecimated() {
+      if (!chartDiv.data || !chartDiv.data.length || decimateUpdatePending) return;
+      decimateUpdatePending = true;
+
+      // Use requestAnimationFrame to avoid blocking the UI
+      requestAnimationFrame(() => {
+        const decimated = getDecimatedData();
+        if (decimated) {
+          const update = {
+            x: decimated.map(d => d.x),
+            y: decimated.map(d => d.y)
+          };
+          Plotly.restyle(chartDiv, update).then(() => {
+            decimateUpdatePending = false;
+          }).catch(() => {
+            decimateUpdatePending = false;
+          });
+        } else {
+          decimateUpdatePending = false;
+        }
+      });
+    }
+
     function decimateBuffer(buffer, stride) {
       if (stride <= 1 || buffer.length <= 2) return buffer;
       const result = [];
@@ -820,25 +931,25 @@
 
     function renderBufferedData() {
       if (dataBuffer.length) {
-        const stride = Math.ceil(dataBuffer.length / MAX_POINTS_PER_FLUSH);
-        const flush = decimateBuffer(dataBuffer, stride);
-        const latest = flush.at(-1);
-
-        const xs = flush.map(d => d.timestamp);
-        const updateX = [];
-        const updateY = [];
-        const indices = [];
-
-        for (let i = 0; i < tracesCount; i++) {
-          indices.push(i);
-          updateX.push(xs);
-          updateY.push(flush.map(d => d.v[i]));
+        // Update master history
+        for (const sample of dataBuffer) {
+          const ts = sample.timestamp.getTime();
+          masterTimestamps.push(ts);
+          for (let i = 0; i < tracesCount; i++) {
+            masterValues[i].push(sample.v[i]);
+          }
         }
 
-        if (indices.length) {
-          // cap total history per trace to the same as historical.csv
-          Plotly.extendTraces(chartDiv, { x: updateX, y: updateY }, indices, MAX_POINTS);
+        // Cap master history
+        if (masterTimestamps.length > MAX_HISTORY_POINTS) {
+          const removeCount = masterTimestamps.length - MAX_HISTORY_POINTS;
+          masterTimestamps.splice(0, removeCount);
+          for (let i = 0; i < tracesCount; i++) {
+            masterValues[i].splice(0, removeCount);
+          }
         }
+
+        const latest = dataBuffer.at(-1);
 
         const now = Date.now();
         if (now - lastRelayout > RELAYOUT_INTERVAL) {
@@ -853,12 +964,13 @@
           }
           Plotly.relayout(chartDiv, { 'xaxis.range': [startTime, endTime] })
             .then(() => {
+              updateChartDecimated();
               if (measurementModeActive) {
                 if (realigned) {
                   syncMeasurementShapes();
                 } else {
                   updateMeasurementAnchorsFromCursors(rangeMs);
-                  updateMeasurementOverlay();
+                  requestMeasurementUpdate();
                   updateMeasurementHandles();
                 }
               }
@@ -895,18 +1007,36 @@
 
     // === PLOTTING ===
     function initialisePlotFromSamples(samples) {
-      const xData = Array.from({ length: tracesCount }, () => []);
-      const yData = Array.from({ length: tracesCount }, () => []);
+      // Clear and populate master data
+      masterTimestamps = [];
+      masterValues = Array.from({ length: tracesCount }, () => []);
+
       const visibility = Array.from({ length: tracesCount }, () => true);
 
       samples.forEach(sample => {
+        const ts = sample.timestamp.getTime();
         lastTimestamp = sample.timestamp;
+        masterTimestamps.push(ts);
         for (let i = 0; i < tracesCount; i++) {
-          yData[i].push(sample.v[i]);
-          visibility[i] = sample.vis[i];
-          xData[i].push(sample.timestamp);
+          const val = sample.v[i];
+          masterValues[i].push(val);
+          if (sample.vis && sample.vis[i] !== undefined) visibility[i] = sample.vis[i];
         }
       });
+
+      // Initial decimation for the first view
+      const endTime = lastTimestamp ? lastTimestamp.getTime() : Date.now();
+      const startTime = endTime - timeWindow;
+      const startIdx = findIndexBinary(masterTimestamps, startTime);
+      const endIdx = findIndexBinary(masterTimestamps, endTime);
+
+      const xData = [];
+      const yData = [];
+      for (let i = 0; i < tracesCount; i++) {
+        const d = decimateTrace(masterTimestamps, masterValues[i], startIdx, endIdx, 2000);
+        xData.push(d.x);
+        yData.push(d.y);
+      }
 
       const traces = buildPlotTraces(xData, yData, visibility);
       const layout = buildPlotLayout();
@@ -926,6 +1056,7 @@
           }
         })
         .then(() => {
+          updateChartDecimated();
           updatePinnedToLatest(true);
           if (measurementModeActive) {
             ensureMeasurementCursors();
@@ -1010,7 +1141,7 @@
 
       const baseDate = event.points[0].x instanceof Date ? event.points[0].x : new Date(event.points[0].x);
       lastHoverTime = baseDate instanceof Date && !Number.isNaN(baseDate.getTime()) ? baseDate : null;
-      refreshPinnedForCurrentMode();
+      requestPinnedUpdate();
     }
 
     function onPlotUnhover() {
@@ -1018,14 +1149,21 @@
     }
 
     function onPlotRelayout(eventData) {
+      const isRangeUpdate = eventData && (eventData['xaxis.range[0]'] || eventData['xaxis.range[1]'] || Object.prototype.hasOwnProperty.call(eventData, 'xaxis.range'));
+
+      if (isRangeUpdate) {
+        updateChartDecimated();
+      }
+
       if (!measurementModeActive) return;
+
       if (eventData && Object.keys(eventData).some(k => k.startsWith('shapes['))) {
         captureMeasurementCursorsFromLayout();
-        updateMeasurementOverlay();
+        requestMeasurementUpdate();
         updateMeasurementHandles();
         return;
       }
-      if (eventData && (eventData['xaxis.range[0]'] || eventData['xaxis.range[1]'] || Object.prototype.hasOwnProperty.call(eventData, 'xaxis.range'))) {
+      if (isRangeUpdate) {
         if (skipAnchorSnapOnNextRelayout) {
           skipAnchorSnapOnNextRelayout = false;
           return;
@@ -1036,7 +1174,7 @@
           return;
         }
         updateMeasurementAnchorsFromCursors(range);
-        updateMeasurementOverlay();
+        requestMeasurementUpdate();
         updateMeasurementHandles();
         return;
       }
@@ -1055,8 +1193,8 @@
       userOverride[i] = newVisible;
       Plotly.restyle(chartDiv, { visible: newVisible }, [i]).then(() => {
         currentVis[i] = newVisible;
-        softUpdatePinnedForTime(lastHoverTime || getLatestTime());
-        if (measurementModeActive) updateMeasurementOverlay();
+        requestPinnedUpdate();
+        if (measurementModeActive) requestMeasurementUpdate();
       });
     }
 
@@ -1071,15 +1209,15 @@
     function toggleHighlight(i) {
       if (highlighted.has(i)) highlighted.delete(i);
       else highlighted.add(i);
-      softUpdatePinnedForTime(lastHoverTime || getLatestTime());
-      if (measurementModeActive) updateMeasurementOverlay();
+      requestPinnedUpdate();
+      if (measurementModeActive) requestMeasurementUpdate();
     }
 
     function soloHighlight(i) {
       highlighted.clear();
       highlighted.add(i);
-      softUpdatePinnedForTime(lastHoverTime || getLatestTime());
-      if (measurementModeActive) updateMeasurementOverlay();
+      requestPinnedUpdate();
+      if (measurementModeActive) requestMeasurementUpdate();
     }
 
     // === PANEL HTML BUILD ===
@@ -1165,6 +1303,16 @@
     }
 
     // === MEASUREMENT OVERLAY / CURSORS ===
+    let measurementUpdatePending = false;
+    function requestMeasurementUpdate() {
+      if (!measurementModeActive || measurementUpdatePending) return;
+      measurementUpdatePending = true;
+      requestAnimationFrame(() => {
+        updateMeasurementOverlay();
+        measurementUpdatePending = false;
+      });
+    }
+
     function ensureMeasurementOverlaySections() {
       if (!measurementOverlay) return null;
       let header = measurementOverlay.querySelector('.measurement-header');
@@ -1410,7 +1558,7 @@
         value = Math.max(value, otherValue);
       }
       measurementCursors[measurementHandleDrag.index] = value;
-      updateMeasurementOverlay();
+      requestMeasurementUpdate();
       updateMeasurementShapeDuringDrag(measurementHandleDrag.index, value);
       updateMeasurementAnchorsFromCursors(range);
     }
@@ -1555,7 +1703,7 @@
         editrevision: measurementEditRevision,
         'edits.shapePosition': true
       }).then(() => {
-        updateMeasurementOverlay();
+        requestMeasurementUpdate();
         updateMeasurementHandles();
       }).catch(() => {});
     }
@@ -1618,7 +1766,7 @@
       const traces = chartDiv?.data || [];
       for (let i = 0; i < traces.length; i++) {
         if (!getTraceVisible(i)) continue;
-        const stats = computeTraceStatsBetween(traces[i], startMs, endMs);
+        const stats = computeTraceStatsBetween(i, startMs, endMs);
         if (!stats) continue;
         const name = channelNames[i] || traces[i]?.name || `Trace ${i + 1}`;
         const unit = UNITS_BY_INDEX[i] || '';
@@ -1645,24 +1793,23 @@
       return rows.join('');
     }
 
-    function computeTraceStatsBetween(trace, startMs, endMs) {
+    function computeTraceStatsBetween(traceIndex, startMs, endMs) {
       try {
-        const xs = trace?.x;
-        const ys = trace?.y;
-        if (!xs || !ys || xs.length !== ys.length || !xs.length) return null;
+        const ts = masterTimestamps;
+        const ys = masterValues[traceIndex];
+        if (!ts || !ys || ts.length === 0) return null;
+
+        const startIdx = findIndexBinary(ts, startMs);
+        const endIdx = findIndexBinary(ts, endMs);
+
         let sum = 0;
         let count = 0;
         let min = Infinity;
         let max = -Infinity;
         let firstValue = null;
         let lastValue = null;
-        for (let idx = 0; idx < xs.length; idx++) {
-          let t = xs[idx];
-          if (t instanceof Date) t = t.getTime();
-          else t = new Date(t).getTime();
-          if (!Number.isFinite(t)) continue;
-          if (t < startMs) continue;
-          if (t > endMs) break;
+
+        for (let idx = startIdx; idx <= endIdx && idx < ys.length; idx++) {
           const val = ys[idx];
           if (typeof val !== 'number' || !Number.isFinite(val)) continue;
           if (firstValue === null) firstValue = val;
