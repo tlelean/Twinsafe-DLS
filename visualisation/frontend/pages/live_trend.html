@@ -426,8 +426,8 @@
           const trace = chartDiv.data?.[i];
           const baseColor = trace?.line?.color || COLORS_BY_INDEX[i] || '#fff';
           const strokeColor = shown ? baseColor : '#6b7280';
-          strokeEl.style.borderTopColor = strokeColor;
-        }
+        strokeEl.style.backgroundColor = strokeColor;
+      }
 
         const active = highlighted.has(i);
         row.classList.toggle('is-highlighted', active);
@@ -1215,7 +1215,7 @@
         return `
           <div class="ph-row ${isShownLocally ? '' : 'is-hidden'} ${active ? 'is-highlighted' : ''}" data-index="${traceIdx}" draggable="true" title="Click to toggle visibility">
             <div class="ph-label">
-              <span data-role="stroke" class="ph-row-stroke" style="border-top-style:${isDotted ? 'dotted' : 'solid'}; border-top-color:${strokeColor};"></span>
+              <span data-role="stroke" class="ph-row-stroke" style="background-color:${strokeColor};"></span>
               <span class="truncate">${name}</span>
               <button class="ph-star" type="button" aria-label="Highlight channel" data-active="${active ? 'true' : 'false'}" title="Highlight (Ctrl/Cmd-click to solo)">
                 <svg viewBox="0 0 24 24" fill="${active ? 'gold' : 'none'}" stroke="currentColor" stroke-width="1.6">

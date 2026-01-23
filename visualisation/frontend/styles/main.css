@@ -423,7 +423,6 @@ input[type="number"]::-webkit-outer-spin-button {
 
 .pinned-hover .ph-row.is-hidden {
   opacity: 0.45;
-  filter: grayscale(35%);
 }
 
 .pinned-hover .ph-label {
@@ -440,9 +439,9 @@ input[type="number"]::-webkit-outer-spin-button {
 .pinned-hover .ph-row-stroke {
   display: inline-block;
   width: 32px;
-  height: 0;
+  height: 4px;
   flex-shrink: 0;
-  border-top-width: 4px;
+  border-radius: 2px;
 }
 
 .pinned-hover .ph-value {
