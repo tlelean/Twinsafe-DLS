@@ -16,6 +16,9 @@ from reportlab.platypus import Table, TableStyle
 
 mpl.rcParams['agg.path.chunksize'] = 10000
 
+# Cache for the logo image to avoid re-loading from disk for every report
+_LOGO_CACHE = None
+
 
 class Layout:
     """PDF layout constants for production reports."""
@@ -110,8 +113,11 @@ def format_torque(value):
 
 def insert_plot_and_logo(figure, pdf, is_table, production=False):
     """Insert matplotlib figure and logo into PDF canvas."""
+    global _LOGO_CACHE
+
+    # 200 DPI provides a good balance between generation speed and visual clarity.
     png_figure = io.BytesIO()
-    figure.savefig(png_figure, format='PNG', bbox_inches='tight', dpi=500)
+    figure.savefig(png_figure, format='PNG', bbox_inches='tight', dpi=200)
     png_figure.seek(0)
     plt.close(figure)
     fig_img = ImageReader(png_figure)
@@ -126,12 +132,18 @@ def insert_plot_and_logo(figure, pdf, is_table, production=False):
         mask="auto",
     )
 
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    image_path = os.path.join(BASE_DIR, "Twinsafe.png")
+    # Re-use cached logo ImageReader if available
+    if _LOGO_CACHE is None:
+        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+        image_path = os.path.join(BASE_DIR, "Twinsafe.png")
+        try:
+            _LOGO_CACHE = ImageReader(image_path)
+        except Exception as e:
+            print(f"Warning: Could not load logo image at {image_path}. Error: {e}")
 
-    try:
+    if _LOGO_CACHE is not None:
         pdf.drawImage(
-            image_path,
+            _LOGO_CACHE,
             Layout.LOGO_X,
             Layout.LOGO_Y,
             Layout.LOGO_W,
@@ -139,10 +151,9 @@ def insert_plot_and_logo(figure, pdf, is_table, production=False):
             preserveAspectRatio=True,
             mask="auto",
         )
-    except Exception as e:
-        print(f"Warning: Could not load logo image at {image_path}. Error: {e}")
 
     pdf.save()
+    # Explicitly close all to free memory, especially important in multi-process environments
     plt.close('all')
 
 

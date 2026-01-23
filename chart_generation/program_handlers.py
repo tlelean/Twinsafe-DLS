@@ -4,6 +4,7 @@ from pathlib import Path
 import shutil
 from typing import List
 import pandas as pd
+from concurrent.futures import ProcessPoolExecutor
 
 from graph_plotter import plot_production_channel_data, plot_crosses
 from pdf_helpers import draw_table, draw_production_test_details, insert_plot_and_logo
@@ -73,12 +74,25 @@ class ProductionReportGenerator(BaseReportGenerator):
     """Generate per-channel production reports."""
     
     def generate(self) -> List[Path]:
-        generated_paths: List[Path] = []
+        """Generate reports for all visible channels in parallel."""
+        # Identify visible channels to process
+        visible_channels = [
+            row for _, row in self.channel_info.iterrows()
+            if row.get("visible", False)
+        ]
 
-        for idx, channel_row in self.channel_info.iterrows():
-            if channel_row.get("visible", False):
-                path = self.generate_single_report(channel_row)
-                generated_paths.append(path)
+        if not visible_channels:
+            return []
+
+        # If only one channel, avoid overhead of process pool
+        if len(visible_channels) == 1:
+            return [self.generate_single_report(visible_channels[0])]
+
+        # Use ProcessPoolExecutor to parallelize generation across multiple CPU cores.
+        # This is particularly effective on the Pi 5's quad-core processor.
+        with ProcessPoolExecutor() as executor:
+            # We use list() to realize the results from the iterator
+            generated_paths = list(executor.map(self.generate_single_report, visible_channels))
 
         return generated_paths
 
