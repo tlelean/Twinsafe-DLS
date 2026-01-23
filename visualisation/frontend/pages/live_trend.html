@@ -14,15 +14,9 @@
     <div id="chart" class="chart-container"></div>
 
     <!-- Controls -->
-    <div
-      id="controlOverlay"
-      class="absolute bottom-0 right-0 bg-[#272727] bg-opacity-80 px-2 py-1.5 rounded-2xl shadow-lg z-10"
-    >
-      <div class="control-grid flex items-center gap-2">
-        <select
-          id="timeWindowSelect"
-          class="w-[120px] h-8 px-3 bg-black text-white border border-gray-700 rounded-xl text-sm leading-none appearance-none"
-        >
+    <div id="controlOverlay">
+      <div class="control-grid">
+        <select id="timeWindowSelect">
           <option value="10000">10s</option>
           <option value="30000">30s</option>
           <option value="60000" selected>1m</option>
@@ -30,21 +24,18 @@
           <option value="900000">15m</option>
           <option value="1800000">30m</option>
           <option value="3600000">1h</option>
+          <option value="7200000">2h</option>
+          <option value="14400000">4h</option>
+          <option value="28800000">8h</option>
+          <option value="43200000">12h</option>
+          <option value="86400000">24h</option>
         </select>
 
-        <button
-          id="pausePlayBtn"
-          class="btn w-[120px] h-8 flex items-center justify-center text-sm"
-          type="button"
-        >
+        <button id="pausePlayBtn" class="btn" type="button">
           Pause
         </button>
 
-        <button
-          id="measurementToggleBtn"
-          class="btn w-[120px] h-8 flex items-center justify-center text-sm"
-          type="button"
-        >
+        <button id="measurementToggleBtn" class="btn" type="button">
           Cursors On
         </button>
       </div>
@@ -69,6 +60,38 @@
   </main>
 
   <script>
+    // === CONSTANTS ===
+    const API = '/api';
+    const RENDER_INTERVAL = 500;
+    const RELAYOUT_INTERVAL = 500;
+    const MAX_HISTORY_POINTS = 864000; // 24 hours at 100ms
+    const UNHOVER_GRACE_MS = 200;
+    const PINNED_REFRESH_MS = 120;
+    const MEASUREMENT_HANDLE_COLORS = ['#ffffff', '#ffffff'];
+
+    // 9-channel layout matching your CODESYS / OPC list
+    const defaultChannelNames = [
+      "Channel 1", "Channel 2", "Channel 3", "Channel 4", "Channel 5",
+      "Channel 6", "Channel 7", "Channel 8", "Ambient Temperature"
+    ];
+    const tracesCount = defaultChannelNames.length;
+    const COLORS_BY_INDEX = [
+      '#FF0000', '#00B050', '#FFA500', '#FFFFFF', '#0000FF',
+      '#00FFFF', '#FF00FF', '#80FF00', '#0000FF'
+    ];
+    const LINE_STYLE_BY_INDEX = ['-', '-', '-', '-', '-', '-', '-', '-', '-'];
+    const GROUP_BY_INDEX = [
+      'Pressure (psi)', 'Pressure (psi)', 'Pressure (psi)', 'Pressure (psi)',
+      'Pressure (psi)', 'Pressure (psi)', 'Pressure (psi)', 'Pressure (psi)',
+      'Temperature (°C)'
+    ];
+    const axisConfig = {
+      "Pressure (psi)": { rangemode: 'tozero', autorange: true },
+      "Temperature (°C)": { range: [-60, 260], autorange: false },
+    };
+    const UNITS_BY_INDEX = ['psi', 'psi', 'psi', 'psi', 'psi', 'psi', 'psi', 'psi', '°C'];
+    const defaultChannelOrder = Array.from({ length: tracesCount }, (_, i) => i);
+
     // === DOM ELEMENTS ===
     const chartDiv = document.getElementById('chart');
     const messageOverlay = document.getElementById('messageOverlay');
@@ -88,29 +111,26 @@
     let lastTimestamp = null;
     let lastRelayout = 0;
 
-    // Master history for efficient calculations and decimation
+    // Master history
     let masterTimestamps = []; // stores epoch ms
-    let masterValues = [];     // Array of arrays
-    const MAX_HISTORY_POINTS = 864000; // 24 hours at 100ms
+    let masterValues = Array.from({ length: tracesCount }, () => []);
 
     // Hover state
     let lastHoverTime = null;
     let isPointerOverChart = false;
     let unhoverTimer = null;
-    const UNHOVER_GRACE_MS = 200;
 
     // Panel state
     let pinnedHoverInside = false;
-    const PINNED_REFRESH_MS = 120;
     let lastPinnedRenderAt = 0;
     let lastBuiltMaskKey = '';
+    let channelNames = defaultChannelNames.slice();
+    let channelOrder = defaultChannelOrder.slice();
 
     // Visibility control
     let currentVis = [];
     let serverVisMask = [];
     let userOverride = [];
-
-    // Highlight state
     const highlighted = new Set();
 
     // Measurement state
@@ -122,20 +142,16 @@
     let measurementHandleDrag = null;
     let measurementCursorAnchors = null;
     let skipAnchorSnapOnNextRelayout = false;
-    const MEASUREMENT_HANDLE_COLORS = ['#ffffff', '#ffffff'];
     let measurementRowsEl = null;
     let measurementRowsScrollTop = 0;
     let measurementRowsScrollHeight = 0;
     let measurementRowsClientHeight = 0;
 
+    // Drag and drop state
     let draggingTraceIndex = null;
     let dropTargetTraceIndex = null;
     let dropTargetBefore = false;
     let skipNextRowClick = false;
-
-    // === CONSTANTS ===
-    const RENDER_INTERVAL = 500;
-    const RELAYOUT_INTERVAL = 500;
 
     // === UTILS ===
     function findIndexBinary(arr, target) {
@@ -149,61 +165,13 @@
       return low;
     }
 
-    // sampling / history (matches your CSV)
-    const SAMPLE_PERIOD_MS = 100;       // 100 ms logging
-    const MAX_POINTS = 36000;           // max rows in historical.csv
-    const MAX_POINTS_PER_FLUSH = 150;   // max new samples per render tick
-
-    const API = '/api';
-
-    // 9-channel layout matching your CODESYS / OPC list
-    const defaultChannelNames = [
-      "Channel 1","Channel 2","Channel 3","Channel 4","Channel 5",
-      "Channel 6","Channel 7","Channel 8","Ambient Temperature"
-    ];
-
-    const tracesCount = defaultChannelNames.length;
-
-    let channelNames = defaultChannelNames.slice();
-
-    // Initialize masterValues
-    masterValues = Array.from({ length: tracesCount }, () => []);
-
-    const defaultChannelOrder = Array.from({ length: tracesCount }, (_, i) => i);
-    let channelOrder = defaultChannelOrder.slice();
-
-    const COLORS_BY_INDEX = [
-      '#FF0000',
-      '#00B050',
-      '#FFA500',
-      '#FFFFFF',
-      '#0000FF',
-      '#00FFFF',
-      '#FF00FF',
-      '#80FF00',
-      '#0000FF'
-    ];
-
-    const LINE_STYLE_BY_INDEX = ['-', '-', '-', '-', '-', '-', '-', '-', '-'];
-
-    const GROUP_BY_INDEX = [
-      'Pressure (psi)',
-      'Pressure (psi)',
-      'Pressure (psi)',
-      'Pressure (psi)',
-      'Pressure (psi)',
-      'Pressure (psi)',
-      'Pressure (psi)',
-      'Pressure (psi)',
-      'Temperature (°C)'
-    ];
-
-    const axisConfig = {
-      "Pressure (psi)": { rangemode: 'tozero', autorange: true },
-      "Temperature (°C)": { range: [-60, 260], autorange: false },
-    };
-
-    const UNITS_BY_INDEX = ['psi', 'psi', 'psi', 'psi', 'psi', 'psi', 'psi', 'psi', '°C'];
+    function hexToRgba(hex, alpha = 0.2) {
+      if (!hex) return `rgba(255,255,255,${alpha})`;
+      const m = hex.replace('#', '');
+      const bigint = parseInt(m.length === 3 ? m.split('').map(ch => ch + ch).join('') : m, 16);
+      const r = (bigint >> 16) & 255, g = (bigint >> 8) & 255, b = bigint & 255;
+      return `rgba(${r},${g},${b},${alpha})`;
+    }
 
     // === INIT ===
     document.addEventListener('DOMContentLoaded', () => {
@@ -1239,23 +1207,23 @@
         const value = sampleTraceValueAt(traceIdx, t);
         const valueStr = formatHoverValue(value);
         const unit = UNITS_BY_INDEX[traceIdx] || '';
-        const unitSpan = unit ? `<span style="opacity:0.8; font-size:0.95rem; margin-left:0.25rem;">${unit}</span>` : '';
+        const unitSpan = unit ? `<span class="ph-unit">${unit}</span>` : '';
 
         const strokeColor = isShownLocally ? color : '#6b7280';
         const active = highlighted.has(traceIdx);
 
         return `
           <div class="ph-row ${isShownLocally ? '' : 'is-hidden'} ${active ? 'is-highlighted' : ''}" data-index="${traceIdx}" draggable="true" title="Click to toggle visibility">
-            <div class="ph-label" style="font-size:1.25rem;">
-              <span data-role="stroke" style="display:inline-block; width:32px; height:0; border-top:4px ${isDotted ? 'dotted' : 'solid'} ${strokeColor}; flex-shrink:0;"></span>
-              <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${name}</span>
-              <button class="ph-star" type="button" aria-label="Highlight channel" data-active="${active ? 'true':'false'}" title="Highlight (Ctrl/Cmd-click to solo)">
+            <div class="ph-label">
+              <span data-role="stroke" class="ph-row-stroke" style="border-top-style:${isDotted ? 'dotted' : 'solid'}; border-top-color:${strokeColor};"></span>
+              <span class="truncate">${name}</span>
+              <button class="ph-star" type="button" aria-label="Highlight channel" data-active="${active ? 'true' : 'false'}" title="Highlight (Ctrl/Cmd-click to solo)">
                 <svg viewBox="0 0 24 24" fill="${active ? 'gold' : 'none'}" stroke="currentColor" stroke-width="1.6">
                   <path d="M12 17.27 18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/>
                 </svg>
               </button>
             </div>
-            <div class="ph-value" style="width:100%; font-size:1.45rem; font-variant-numeric:tabular-nums; display:flex; align-items:baseline; justify-content:flex-start; gap:0.25rem; text-align:left;">
+            <div class="ph-value">
               <span data-role="val">${valueStr}</span>${unitSpan}
             </div>
           </div>
@@ -1775,8 +1743,8 @@
         rows.push(`
           <div class="measurement-row">
             <div class="measurement-row-title">
-              <span style="background:${color};"></span>
-              <div>${name}</div>
+              <span class="measurement-row-title-indicator" style="background:${color};"></span>
+              <div class="truncate">${name}</div>
             </div>
             <div class="measurement-stats">
               <div class="measurement-stat"><div class="measurement-stat-label">Avg</div><div>${formatMeasurementNumber(stats.average)}${unitText}</div></div>
