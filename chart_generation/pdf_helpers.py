@@ -2,11 +2,10 @@
 
 import io
 import os
-from typing import Optional
+from datetime import datetime
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-import pandas as pd
 from reportlab.lib import colors
 from reportlab.lib.colors import Color
 from reportlab.lib.pagesizes import A4, landscape
@@ -303,20 +302,40 @@ def draw_all_text(pdf, pdf_text_positions):
 
 def draw_footer_metadata(pdf_canvas, test_metadata) -> None:
     """Draw footer timestamp."""
-    date_time = test_metadata.get("Date Time", "")
-    if not date_time:
+    date_time_raw = test_metadata.get("Date Time", "")
+    if not date_time_raw:
         return
+
+    formatted_dt = date_time_raw
+
+    try:
+        clean_dt = date_time_raw.replace('T', ' ')
+
+        # Try common formats
+        dt = None
+        for fmt in ("%Y-%m-%d %H%M%S.%f", "%Y-%m-%d %H%M%S", "%Y-%m-%d %H:%M:%S"):
+            try:
+                dt = datetime.strptime(clean_dt, fmt)
+                break
+            except ValueError:
+                pass
+
+        if dt:
+            formatted_dt = dt.strftime("%d-%m-%Y_%H-%M-%S")
+
+    except Exception:
+        pass
 
     font = "Helvetica-Oblique"
     size = 8
     colour = Color(0.5, 0.5, 0.5)
 
-    text_width = pdf_canvas.stringWidth(date_time, font, size)
+    text_width = pdf_canvas.stringWidth(formatted_dt, font, size)
     x = Layout.PAGE_WIDTH - Layout.MARGIN_RIGHT - text_width
 
     draw_text_on_pdf(
         pdf_canvas,
-        date_time,
+        formatted_dt,
         x,
         Layout.FOOTER_TEXT_Y,
         colour=colour,

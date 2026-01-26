@@ -1,6 +1,7 @@
 """Production chart report generator."""
 
 from pathlib import Path
+from datetime import datetime
 import shutil
 from typing import List
 import pandas as pd
@@ -28,11 +29,35 @@ class BaseReportGenerator:
 
     def build_output_path(self, test_metadata) -> Path:
         """Construct the output PDF path from metadata."""
-        return self.pdf_output_path / (
-            f"{test_metadata.get('Unique Number', 'unknown')}_"
-            f"{test_metadata.get('Test Name', 'test')}_"
-            f"{test_metadata.get('Date Time', 'now')}.tmp.pdf"
-        )
+        ots_number = test_metadata.get('OTS Number') or 'Unknown'
+        line_item = test_metadata.get('Line Item') or 'Unknown'
+        unique_number = test_metadata.get('Unique Number') or 'Unknown'
+        date_time_raw = test_metadata.get('Date Time', '')
+
+        date_str = "UnknownDate"
+        time_str = "UnknownTime"
+
+        if date_time_raw:
+            try:
+                # Normalise separator
+                clean_dt = date_time_raw.replace('T', ' ')
+
+                # Try common formats
+                for fmt in ("%Y-%m-%d %H%M%S.%f", "%Y-%m-%d %H%M%S", "%Y-%m-%d %H:%M:%S"):
+                    try:
+                        dt = datetime.strptime(clean_dt, fmt)
+                        break
+                    except ValueError:
+                        dt = None
+
+                if dt:
+                    date_str = dt.strftime("%d-%m-%Y")
+                    time_str = dt.strftime("%H-%M-%S")
+
+            except Exception:
+                pass
+
+        return self.pdf_output_path / f"{ots_number}_{line_item}_{unique_number}_{date_str}_{time_str}.tmp.pdf"
     
     def finalize_output_path(self, temp_path: Path) -> Path:
         """Rename the temporary PDF path to its final name and return it."""
@@ -113,7 +138,7 @@ class ProductionReportGenerator(BaseReportGenerator):
         metadata = dict(self.test_metadata)
         metadata["Unique Number"] = unique_number
 
-        unique_path = self.pdf_output_path / f"{unique_number}_{metadata.get('Test Name', 'test')}_{metadata.get('Date Time', 'now').replace('T', '_').replace(':', '-')}.tmp.pdf"
+        unique_path = self.build_output_path(metadata)
 
         # Ensure output directory exists
         unique_path.parent.mkdir(parents=True, exist_ok=True)
