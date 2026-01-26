@@ -157,13 +157,13 @@
       return `${dd}-${mmo}-${y}_${HH}-${MM}-${SS}`;
     }
 
-
     function getUniqueFromFilename(filename) {
-      // first chunk before "_" e.g. "12_19-12-2025_14-14-16_x.pdf" -> "12"
       if (!filename || typeof filename !== "string") return null;
-      const base = filename.split("/").pop();
-      const first = base.split("_")[0];
-      return first ? first.trim() : null;
+
+      const base = filename.split("/").pop() || "";
+      const parts = base.split("_");
+
+      return parts.length >= 3 ? parts[2] : null;
     }
 
     function getViewerSize() {

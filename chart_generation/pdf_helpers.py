@@ -2,11 +2,10 @@
 
 import io
 import os
-from typing import Optional
+from datetime import datetime
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-import pandas as pd
 from reportlab.lib import colors
 from reportlab.lib.colors import Color
 from reportlab.lib.pagesizes import A4, landscape
@@ -307,22 +306,23 @@ def draw_footer_metadata(pdf_canvas, test_metadata) -> None:
     if not date_time_raw:
         return
 
-    # Format Date Time: 2026-01-21T145537.940 -> 20260121-145537
     formatted_dt = date_time_raw
+
     try:
         clean_dt = date_time_raw.replace('T', ' ')
-        dt_parts = clean_dt.split(' ')
-        date_str = ""
-        time_str = ""
-        if len(dt_parts) >= 1:
-            date_str = dt_parts[0].replace('-', '')
-        if len(dt_parts) >= 2:
-            time_str = dt_parts[1].split('.')[0].replace(':', '')
 
-        if date_str and time_str:
-            formatted_dt = f"{date_str}-{time_str}"
-        elif date_str:
-            formatted_dt = date_str
+        # Try common formats
+        dt = None
+        for fmt in ("%Y-%m-%d %H%M%S.%f", "%Y-%m-%d %H%M%S", "%Y-%m-%d %H:%M:%S"):
+            try:
+                dt = datetime.strptime(clean_dt, fmt)
+                break
+            except ValueError:
+                pass
+
+        if dt:
+            formatted_dt = dt.strftime("%d-%m-%Y_%H-%M-%S")
+
     except Exception:
         pass
 

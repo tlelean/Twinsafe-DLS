@@ -1,6 +1,7 @@
 """Production chart report generator."""
 
 from pathlib import Path
+from datetime import datetime
 import shutil
 from typing import List
 import pandas as pd
@@ -33,22 +34,30 @@ class BaseReportGenerator:
         unique_number = test_metadata.get('Unique Number') or 'Unknown'
         date_time_raw = test_metadata.get('Date Time', '')
 
-        # Format Date Time: 2026-01-21T145537.940 -> Date=20260121, Time=145537
         date_str = "UnknownDate"
         time_str = "UnknownTime"
+
         if date_time_raw:
             try:
-                # Handle formats like "2026-01-21T145537.940" or "2026-01-21 145537"
+                # Normalise separator
                 clean_dt = date_time_raw.replace('T', ' ')
-                dt_parts = clean_dt.split(' ')
-                if len(dt_parts) >= 1:
-                    date_str = dt_parts[0].replace('-', '')
-                if len(dt_parts) >= 2:
-                    time_str = dt_parts[1].split('.')[0].replace(':', '')
+
+                # Try common formats
+                for fmt in ("%Y-%m-%d %H%M%S.%f", "%Y-%m-%d %H%M%S", "%Y-%m-%d %H:%M:%S"):
+                    try:
+                        dt = datetime.strptime(clean_dt, fmt)
+                        break
+                    except ValueError:
+                        dt = None
+
+                if dt:
+                    date_str = dt.strftime("%d-%m-%Y")
+                    time_str = dt.strftime("%H-%M-%S")
+
             except Exception:
                 pass
 
-        return self.pdf_output_path / f"{ots_number}-{line_item}-{unique_number}-{date_str}-{time_str}.tmp.pdf"
+        return self.pdf_output_path / f"{ots_number}_{line_item}_{unique_number}_{date_str}_{time_str}.tmp.pdf"
     
     def finalize_output_path(self, temp_path: Path) -> Path:
         """Rename the temporary PDF path to its final name and return it."""
