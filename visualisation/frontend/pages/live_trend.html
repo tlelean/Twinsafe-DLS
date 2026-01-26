@@ -30,6 +30,11 @@
           <option value="900000">15m</option>
           <option value="1800000">30m</option>
           <option value="3600000">1h</option>
+          <option value="7200000">2h</option>
+          <option value="14400000">4h</option>
+          <option value="28800000">8h</option>
+          <option value="43200000">12h</option>
+          <option value="86400000">24h</option>
         </select>
 
         <button
@@ -151,7 +156,7 @@
 
     // sampling / history (matches your CSV)
     const SAMPLE_PERIOD_MS = 100;       // 100 ms logging
-    const MAX_POINTS = 36000;           // max rows in historical.csv
+    const MAX_POINTS = 864000;          // max rows in historical.csv
     const MAX_POINTS_PER_FLUSH = 150;   // max new samples per render tick
 
     const API = '/api';
