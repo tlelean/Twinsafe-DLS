@@ -28,11 +28,27 @@ class BaseReportGenerator:
 
     def build_output_path(self, test_metadata) -> Path:
         """Construct the output PDF path from metadata."""
-        return self.pdf_output_path / (
-            f"{test_metadata.get('Unique Number', 'unknown')}_"
-            f"{test_metadata.get('Test Name', 'test')}_"
-            f"{test_metadata.get('Date Time', 'now')}.tmp.pdf"
-        )
+        ots_number = test_metadata.get('OTS Number') or 'Unknown'
+        line_item = test_metadata.get('Line Item') or 'Unknown'
+        unique_number = test_metadata.get('Unique Number') or 'Unknown'
+        date_time_raw = test_metadata.get('Date Time', '')
+
+        # Format Date Time: 2026-01-21T145537.940 -> Date=20260121, Time=145537
+        date_str = "UnknownDate"
+        time_str = "UnknownTime"
+        if date_time_raw:
+            try:
+                # Handle formats like "2026-01-21T145537.940" or "2026-01-21 145537"
+                clean_dt = date_time_raw.replace('T', ' ')
+                dt_parts = clean_dt.split(' ')
+                if len(dt_parts) >= 1:
+                    date_str = dt_parts[0].replace('-', '')
+                if len(dt_parts) >= 2:
+                    time_str = dt_parts[1].split('.')[0].replace(':', '')
+            except Exception:
+                pass
+
+        return self.pdf_output_path / f"{ots_number}-{line_item}-{unique_number}-{date_str}-{time_str}.tmp.pdf"
     
     def finalize_output_path(self, temp_path: Path) -> Path:
         """Rename the temporary PDF path to its final name and return it."""
@@ -113,7 +129,7 @@ class ProductionReportGenerator(BaseReportGenerator):
         metadata = dict(self.test_metadata)
         metadata["Unique Number"] = unique_number
 
-        unique_path = self.pdf_output_path / f"{unique_number}_{metadata.get('Test Name', 'test')}_{metadata.get('Date Time', 'now').replace('T', '_').replace(':', '-')}.tmp.pdf"
+        unique_path = self.build_output_path(metadata)
 
         # Ensure output directory exists
         unique_path.parent.mkdir(parents=True, exist_ok=True)

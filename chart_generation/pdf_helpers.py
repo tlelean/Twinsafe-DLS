@@ -303,20 +303,39 @@ def draw_all_text(pdf, pdf_text_positions):
 
 def draw_footer_metadata(pdf_canvas, test_metadata) -> None:
     """Draw footer timestamp."""
-    date_time = test_metadata.get("Date Time", "")
-    if not date_time:
+    date_time_raw = test_metadata.get("Date Time", "")
+    if not date_time_raw:
         return
+
+    # Format Date Time: 2026-01-21T145537.940 -> 20260121-145537
+    formatted_dt = date_time_raw
+    try:
+        clean_dt = date_time_raw.replace('T', ' ')
+        dt_parts = clean_dt.split(' ')
+        date_str = ""
+        time_str = ""
+        if len(dt_parts) >= 1:
+            date_str = dt_parts[0].replace('-', '')
+        if len(dt_parts) >= 2:
+            time_str = dt_parts[1].split('.')[0].replace(':', '')
+
+        if date_str and time_str:
+            formatted_dt = f"{date_str}-{time_str}"
+        elif date_str:
+            formatted_dt = date_str
+    except Exception:
+        pass
 
     font = "Helvetica-Oblique"
     size = 8
     colour = Color(0.5, 0.5, 0.5)
 
-    text_width = pdf_canvas.stringWidth(date_time, font, size)
+    text_width = pdf_canvas.stringWidth(formatted_dt, font, size)
     x = Layout.PAGE_WIDTH - Layout.MARGIN_RIGHT - text_width
 
     draw_text_on_pdf(
         pdf_canvas,
-        date_time,
+        formatted_dt,
         x,
         Layout.FOOTER_TEXT_Y,
         colour=colour,
