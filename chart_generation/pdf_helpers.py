@@ -236,17 +236,16 @@ def build_production_text_positions(test_metadata, channel_info, light_blue, bla
     """Build text position list for production reports."""
     # Parse test date from Date Time metadata
     test_date = ""
-    if test_metadata.get('Date Time'):
+
+    dt_str = test_metadata.get('Date Time')
+    if dt_str:
         try:
-            dt = test_metadata['Date Time'].replace('T', ' ')
-            # Convert from "2026-01-21 145537.940" to "21-01-2026 14:55:37"
-            parts = dt.split(' ')
-            if len(parts) == 2:
-                date_part = parts[0]  # 2026-01-21
-                y, m, d = date_part.split('-')
-                test_date = f"{d}/{m}/{y}"
-        except:
-            test_date = test_metadata.get('Date Time', '')
+            # Example: "21-01-2026_14-55-37"
+            date_part = dt_str.split('_')[0]      # "21-01-2026"
+            d, m, y = date_part.split('-')
+            test_date = f"{d}/{m}/{y}"
+        except Exception:
+            test_date = dt_str
     
     # Format torque values - show N/A if 0 or None
     breakout_display = "N/A" if not breakout_torque or breakout_torque == 0 else f"{breakout_torque} ft.lbs"
@@ -299,32 +298,11 @@ def draw_all_text(pdf, pdf_text_positions):
     for x, y, text, colour, replace_empty in pdf_text_positions:
         draw_text_on_pdf(pdf, text, x, y, colour=colour, size=10, left_aligned=True, replace_empty=replace_empty)
 
-
 def draw_footer_metadata(pdf_canvas, test_metadata) -> None:
     """Draw footer timestamp."""
-    date_time_raw = test_metadata.get("Date Time", "")
-    if not date_time_raw:
+    formatted_dt = test_metadata.get("Date Time", "")
+    if not formatted_dt:
         return
-
-    formatted_dt = date_time_raw
-
-    try:
-        clean_dt = date_time_raw.replace('T', ' ')
-
-        # Try common formats
-        dt = None
-        for fmt in ("%Y-%m-%d %H%M%S.%f", "%Y-%m-%d %H%M%S", "%Y-%m-%d %H:%M:%S"):
-            try:
-                dt = datetime.strptime(clean_dt, fmt)
-                break
-            except ValueError:
-                pass
-
-        if dt:
-            formatted_dt = dt.strftime("%d-%m-%Y_%H-%M-%S")
-
-    except Exception:
-        pass
 
     font = "Helvetica-Oblique"
     size = 8
@@ -343,7 +321,6 @@ def draw_footer_metadata(pdf_canvas, test_metadata) -> None:
         size=size,
         left_aligned=True,
     )
-
 
 def draw_table(pdf_canvas, dataframe, x=15, y=15, width=600, height=51.5):
     """Render a DataFrame as a table on PDF canvas."""
