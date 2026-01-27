@@ -249,7 +249,7 @@ class CalibrationReportGenerator(BaseReportGenerator):
                 times, values, marker='x', s=50, color='black'
             )
 
-        pdf = draw_calibration_test_details(self.test_metadata, unique_path)
+        pdf = draw_calibration_test_details(self.test_metadata, unique_path, channel_index=calibration_info.get("channel_index"))
 
         # Add main calibration table
         draw_table(pdf_canvas=pdf, dataframe=average_values)

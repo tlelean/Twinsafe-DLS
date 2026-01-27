@@ -495,7 +495,7 @@ def draw_production_test_details(test_metadata, channel_info, pdf_output_path, c
     return pdf
 
 
-def draw_calibration_test_details(test_metadata, pdf_output_path):
+def draw_calibration_test_details(test_metadata, pdf_output_path, channel_index=None):
     """Generate calibration test details PDF."""
     pdf = canvas.Canvas(str(pdf_output_path), pagesize=landscape(A4))
     pdf.setStrokeColor(colors.black)
@@ -503,9 +503,11 @@ def draw_calibration_test_details(test_metadata, pdf_output_path):
     light_blue = Color(0.325, 0.529, 0.761)
     black = Color(0, 0, 0)
 
+    title = f"Calibration Channel {channel_index}" if channel_index is not None else "Calibration Report"
+
     draw_text_on_pdf(
         pdf,
-        "Calibration Report",
+        title,
         Layout.MAIN_TITLE_X,
         Layout.MAIN_TITLE_Y,
         font="Helvetica-Bold",
