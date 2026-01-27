@@ -211,6 +211,19 @@ def draw_production_layout_boxes(pdf):
         draw_bounding_box(pdf, *box)
 
 
+def draw_calibration_layout_boxes(pdf):
+    """Draw layout boxes for calibration reports, excluding the empty box below equipment."""
+    boxes = [
+        (Layout.HEADER_X, Layout.HEADER_Y, Layout.HEADER_W, Layout.HEADER_H),
+        (Layout.GRAPH_X, Layout.GRAPH_Y_TABLE, Layout.GRAPH_W, Layout.GRAPH_H_TABLE),
+        (Layout.TABLE_X, Layout.TABLE_Y, Layout.TABLE_W, Layout.TABLE_H),
+        (Layout.STAMP_X, Layout.STAMP_Y, Layout.STAMP_W, Layout.STAMP_H),
+        (Layout.INFO_RIGHT_X, Layout.INFO_RIGHT_Y + Layout.TRANSDUCER_ROW_HEIGHT * 8, Layout.INFO_RIGHT_W, Layout.INFO_RIGHT_H - Layout.TRANSDUCER_ROW_HEIGHT * 8),
+    ]
+    for box in boxes:
+        draw_bounding_box(pdf, *box)
+
+
 def draw_headers(pdf, test_metadata, light_blue):
     """Draw section headers on production report."""
     draw_text_on_pdf(
@@ -499,7 +512,7 @@ def draw_calibration_test_details(test_metadata, pdf_output_path, channel_index=
     """Generate calibration test details PDF."""
     pdf = canvas.Canvas(str(pdf_output_path), pagesize=landscape(A4))
     pdf.setStrokeColor(colors.black)
-    draw_production_layout_boxes(pdf)
+    draw_calibration_layout_boxes(pdf)
     light_blue = Color(0.325, 0.529, 0.761)
     black = Color(0, 0, 0)
 
@@ -546,16 +559,16 @@ def draw_calibration_test_details(test_metadata, pdf_output_path, channel_index=
 
     pdf_text_positions = [
         (Layout.HEADER_COL1_LABEL_X, Layout.HEADER_ROW1_Y, "OTS Number", black, False),
-        (Layout.HEADER_COL1_VALUE_X, Layout.HEADER_ROW1_Y, "", light_blue, False),
+        (Layout.HEADER_COL1_VALUE_X, Layout.HEADER_ROW1_Y, "", light_blue, True),
         (Layout.HEADER_COL1_LABEL_X, Layout.HEADER_ROW2_Y, "Unique Number", black, False),
-        (Layout.HEADER_COL1_VALUE_X, Layout.HEADER_ROW2_Y, "", light_blue, False),
+        (Layout.HEADER_COL1_VALUE_X, Layout.HEADER_ROW2_Y, "", light_blue, True),
         (Layout.HEADER_COL1_LABEL_X, Layout.HEADER_ROW3_Y, "Drawing Number", black, False),
-        (Layout.HEADER_COL1_VALUE_X, Layout.HEADER_ROW3_Y, "", light_blue, False),
+        (Layout.HEADER_COL1_VALUE_X, Layout.HEADER_ROW3_Y, "", light_blue, True),
         (Layout.HEADER_COL1_LABEL_X, Layout.HEADER_ROW4_Y, "Client", black, False),
-        (Layout.HEADER_COL1_VALUE_X, Layout.HEADER_ROW4_Y, "", light_blue, False),
+        (Layout.HEADER_COL1_VALUE_X, Layout.HEADER_ROW4_Y, "", light_blue, True),
 
         (Layout.HEADER_COL2_LABEL_X, Layout.HEADER_ROW1_Y, "Line Item", black, False),
-        (Layout.HEADER_COL2_VALUE_X, Layout.HEADER_ROW1_Y, "", light_blue, False),
+        (Layout.HEADER_COL2_VALUE_X, Layout.HEADER_ROW1_Y, "", light_blue, True),
         (Layout.HEADER_COL2_LABEL_X, Layout.HEADER_ROW2_Y, "Test Date", black, False),
         (Layout.HEADER_COL2_VALUE_X, Layout.HEADER_ROW2_Y, test_date, light_blue, True),
 
@@ -565,7 +578,7 @@ def draw_calibration_test_details(test_metadata, pdf_output_path, channel_index=
         (Layout.RIGHT_COL_VALUE_X, Layout.SERIAL_NO_Y, serial_number, light_blue, True),
 
         (Layout.RIGHT_COL_LABEL_X, Layout.OPERATIVE_Y, "Operative:", black, False),
-        (Layout.OPERATIVE_VALUE_X, Layout.OPERATIVE_Y, "", light_blue, False),
+        (Layout.OPERATIVE_VALUE_X, Layout.OPERATIVE_Y, "", light_blue, True),
     ]
 
     draw_all_text(pdf, pdf_text_positions)
