@@ -1,4 +1,4 @@
-"""Production chart report generator."""
+"""Production and Calibration chart report generator."""
 
 from pathlib import Path
 import argparse
@@ -7,27 +7,34 @@ from data_loading import (
     load_test_information,
     prepare_primary_data,
 )
-from program_handlers import ProductionReportGenerator
+from program_handlers import ProductionReportGenerator, CalibrationReportGenerator
 
 
 def generate_report(primary_data_file, test_details_file, pdf_output_path):
     """
-    Processes data files to generate production PDF reports.
+    Processes data files to generate PDF reports.
     """
-    test_metadata, channel_info = load_test_information(test_details_file)
+    test_metadata, info_obj = load_test_information(test_details_file)
 
     cleaned_data, active_channels = prepare_primary_data(
         primary_data_file,
-        channel_info,
+        info_obj,
     )
 
-    handler_instance = ProductionReportGenerator(
-        program_name="Production",
+    if isinstance(info_obj, dict) and "channel_index" in info_obj:
+        handler_class = CalibrationReportGenerator
+        program_name = "Calibration"
+    else:
+        handler_class = ProductionReportGenerator
+        program_name = "Production"
+
+    handler_instance = handler_class(
+        program_name=program_name,
         pdf_output_path=pdf_output_path,
         test_metadata=test_metadata,
         active_channels=active_channels,
         cleaned_data=cleaned_data,
-        channel_info=channel_info,
+        info_obj=info_obj,
     )
     handler_instance.generate()
 
