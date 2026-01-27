@@ -112,6 +112,53 @@ def plot_production_channel_data(cleaned_data):
     # Legend + layout
     fig.legend([p_line, t_line], [p_label, t_label], loc="lower center", ncol=2, frameon=False, bbox_to_anchor=(0.5, 0.05))
     fig.tight_layout(rect=[0, 0.075, 1, 1])
-    
+
     return fig, ax_p
 
+
+def plot_calibration_data(cleaned_data):
+    """Generate calibration chart with calibrated channel and ambient temperature."""
+    df = cleaned_data.copy()
+    df = df.dropna(subset=["Datetime"])
+
+    # Create axes
+    fig, ax_p = plt.subplots(figsize=(11.96, 8.49))
+    ax_t = ax_p.twinx()
+
+    # Plot calibrated channel (left)
+    p_label = "Calibrated Channel"
+    p_line = ax_p.plot(df["Datetime"], df["Calibrated Channel"], label=p_label, color="#FF0000", lw=1)[0]
+    ax_p.set_ylabel(p_label, color="#FF0000")
+    ax_p.tick_params(axis="y", colors="#FF0000")
+    ax_p.spines["top"].set_visible(False)
+    ax_p.spines["right"].set_visible(False)
+    ax_p.spines["left"].set_edgecolor("#FF0000")
+    ax_p.spines["left"].set_linewidth(0.5)
+    ax_p.spines["bottom"].set_linewidth(0.5)
+    ax_p.margins(x=0)
+
+    # Plot ambient temperature (right)
+    t_label = "Ambient Temperature (°C)"
+    t_line = ax_t.plot(df["Datetime"], df["Ambient Temperature"], label=t_label, color="#0000FF", ls=":", lw=1)[0]
+    ax_t.set_ylabel(t_label, color="#0000FF")
+    ax_t.tick_params(axis="y", colors="#0000FF")
+    ax_t.spines["top"].set_visible(False)
+    ax_t.spines["left"].set_visible(False)
+    ax_t.spines["bottom"].set_visible(False)
+    ax_t.spines["right"].set_edgecolor("#0000FF")
+    ax_t.spines["right"].set_linewidth(0.5)
+    ax_t.margins(x=0)
+    ax_t.set_ylim(-60, 260)
+    ax_t.yaxis.set_major_locator(MultipleLocator(10))
+
+    # X axis formatting
+    ax_p.xaxis.set_major_formatter(mdates.DateFormatter("%d/%m/%Y\n%H:%M:%S"))
+    x_min, x_max = df["Datetime"].min(), df["Datetime"].max()
+    if pd.notna(x_min) and pd.notna(x_max) and x_min != x_max:
+        ax_p.set_xticks(pd.date_range(x_min, x_max, periods=10))
+
+    # Legend + layout
+    fig.legend([p_line, t_line], [p_label, t_label], loc="lower center", ncol=2, frameon=False, bbox_to_anchor=(0.5, 0.05))
+    fig.tight_layout(rect=[0, 0.075, 1, 1])
+
+    return fig, ax_p

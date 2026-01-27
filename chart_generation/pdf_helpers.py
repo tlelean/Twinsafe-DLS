@@ -6,6 +6,7 @@ from datetime import datetime
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+import pandas as pd
 from reportlab.lib import colors
 from reportlab.lib.colors import Color
 from reportlab.lib.pagesizes import A4, landscape
@@ -17,6 +18,12 @@ mpl.rcParams['agg.path.chunksize'] = 10000
 
 # Cache for the logo image to avoid re-loading from disk for every report
 _LOGO_CACHE = None
+
+CALIBRATION_THRESHOLDS = {
+    "Abs Error (µA) - ±3.6 µA": 3.6,
+    "Abs Error (mV) - ±0.12 mV": 0.12,
+    "Abs Error (mV) - ±1.0 mV": 1.0,
+}
 
 
 class Layout:
@@ -322,6 +329,37 @@ def draw_footer_metadata(pdf_canvas, test_metadata) -> None:
         left_aligned=True,
     )
 
+def evaluate_calibration_thresholds(
+    table: pd.DataFrame,
+    precise_errors: pd.Series = None,
+) -> pd.DataFrame:
+    """Return a boolean mask indicating threshold breaches for calibration tables."""
+
+    if table is None or table.empty:
+        return pd.DataFrame()
+
+    mask = {}
+    for row_label, threshold in CALIBRATION_THRESHOLDS.items():
+        if row_label not in table.index:
+            continue
+
+        if precise_errors is not None and row_label.startswith("Abs Error"):
+            values = pd.to_numeric(
+                precise_errors.reindex(table.columns),
+                errors="coerce",
+            )
+        else:
+            values = pd.to_numeric(table.loc[row_label], errors="coerce")
+
+        mask[row_label] = values.abs() > threshold
+
+    if not mask:
+        return pd.DataFrame(index=[], columns=table.columns, dtype=bool)
+
+    result = pd.DataFrame(mask).T.fillna(False)
+    return result.astype(bool)
+
+
 def draw_table(pdf_canvas, dataframe, x=15, y=15, width=600, height=51.5):
     """Render a DataFrame as a table on PDF canvas."""
     if dataframe is None or dataframe.empty:
@@ -352,9 +390,93 @@ def draw_table(pdf_canvas, dataframe, x=15, y=15, width=600, height=51.5):
         ('BACKGROUND', (0, 0), (-1, -1), colors.white),
         ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
     ])
+
+    breach_mask = evaluate_calibration_thresholds(df)
+
+    for i, row_label in enumerate(df.index.astype(str)):
+        if row_label not in CALIBRATION_THRESHOLDS:
+            continue
+
+        breaches = (
+            breach_mask.loc[row_label]
+            if row_label in breach_mask.index
+            else pd.Series(index=df.columns, data=False)
+        )
+
+        for col_offset, column_key in enumerate(df.columns):
+            # The table data starts from column 0 (which is row label in df, wait)
+            # Actually df.values.tolist() contains values.
+            # If df.index is the labels, then we need to map them.
+            # Wait, draw_table in /tmp/file_attachments/DLS Chart Generation/pdf_helpers.py:
+            # data = df.astype(str).values.tolist()
+            # This doesn't include the index.
+            # But the table in Calibration has labels as the first column?
+            # Ah, calculate_succesful_calibration inserts "0" as the first column with the labels.
+            # So column 0 is the labels.
+
+            if col_offset == 0:
+                continue
+
+            breached = bool(breaches.get(column_key, False))
+            style.add(
+                'BACKGROUND',
+                (col_offset, i),
+                (col_offset, i),
+                colors.red if breached else colors.limegreen,
+            )
+
     table.setStyle(style)
     table.wrapOn(pdf_canvas, width, height)
     table.drawOn(pdf_canvas, x, y)
+
+
+def draw_regression_table(
+    pdf_canvas,
+    coefficients,
+    x = Layout.STAMP_X + 5,
+    y = None,
+    width = Layout.STAMP_W - 10,
+    padding = 5,
+):
+    """Draw the polynomial coefficients table."""
+
+    if coefficients is None:
+        return
+
+    series = pd.Series(coefficients).reindex(["S3", "S2", "S1", "S0"])
+    if series.dropna().empty:
+        return
+
+    data = [["Coefficient", "Value"]]
+    for label, value in series.items():
+        display = "N/A" if pd.isna(value) else f"{value:.5g}"
+        data.append([label, display])
+
+    table = Table(
+        data,
+        colWidths=[width * 0.45, width * 0.55],
+    )
+
+    style = TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+    ])
+    table.setStyle(style)
+
+    available_height = Layout.STAMP_H - (2 * padding)
+    _, table_height = table.wrap(width, available_height)
+    draw_y = (
+        Layout.STAMP_Y + Layout.STAMP_H - padding - table_height
+        if y is None
+        else y
+    )
+
+    table.drawOn(pdf_canvas, x, draw_y)
 
 
 def draw_production_test_details(test_metadata, channel_info, pdf_output_path, cleaned_data, transducer_code, allowable_drop, breakout_torque, running_torque):
@@ -368,6 +490,73 @@ def draw_production_test_details(test_metadata, channel_info, pdf_output_path, c
     pdf_text_positions = build_production_text_positions(test_metadata, channel_info, light_blue, black, breakout_torque, running_torque, allowable_drop)
     
     pdf_text_positions += build_production_transducer_positions(transducer_code, light_blue)
+    draw_all_text(pdf, pdf_text_positions)
+    draw_footer_metadata(pdf, test_metadata)
+    return pdf
+
+
+def draw_calibration_test_details(test_metadata, pdf_output_path):
+    """Generate calibration test details PDF."""
+    pdf = canvas.Canvas(str(pdf_output_path), pagesize=landscape(A4))
+    pdf.setStrokeColor(colors.black)
+    draw_production_layout_boxes(pdf)
+    light_blue = Color(0.325, 0.529, 0.761)
+    black = Color(0, 0, 0)
+
+    draw_text_on_pdf(
+        pdf,
+        "Calibration Report",
+        Layout.MAIN_TITLE_X,
+        Layout.MAIN_TITLE_Y,
+        font="Helvetica-Bold",
+        size=16,
+    )
+    draw_text_on_pdf(
+        pdf,
+        "Data Recording Equipment Used",
+        Layout.RIGHT_COL_X + (Layout.RIGHT_COL_W / 2),
+        475,
+        "Helvetica-Bold",
+        size=12
+    )
+    draw_text_on_pdf(
+        pdf,
+        "3rd Party Stamp and Date",
+        Layout.RIGHT_COL_X + (Layout.RIGHT_COL_W / 2),
+        45,
+        "Helvetica-Bold",
+        size=12
+    )
+
+    # Metadata fields: Test Date, Data Logger, Serial Number
+    test_date = test_metadata.get("Test Date", "")
+    data_logger = test_metadata.get("Data Logger", "")
+    serial_number = test_metadata.get("Serial Number", "")
+
+    pdf_text_positions = [
+        (Layout.HEADER_COL1_LABEL_X, Layout.HEADER_ROW1_Y, "OTS Number", black, False),
+        (Layout.HEADER_COL1_VALUE_X, Layout.HEADER_ROW1_Y, "", light_blue, False),
+        (Layout.HEADER_COL1_LABEL_X, Layout.HEADER_ROW2_Y, "Unique Number", black, False),
+        (Layout.HEADER_COL1_VALUE_X, Layout.HEADER_ROW2_Y, "", light_blue, False),
+        (Layout.HEADER_COL1_LABEL_X, Layout.HEADER_ROW3_Y, "Drawing Number", black, False),
+        (Layout.HEADER_COL1_VALUE_X, Layout.HEADER_ROW3_Y, "", light_blue, False),
+        (Layout.HEADER_COL1_LABEL_X, Layout.HEADER_ROW4_Y, "Client", black, False),
+        (Layout.HEADER_COL1_VALUE_X, Layout.HEADER_ROW4_Y, "", light_blue, False),
+
+        (Layout.HEADER_COL2_LABEL_X, Layout.HEADER_ROW1_Y, "Line Item", black, False),
+        (Layout.HEADER_COL2_VALUE_X, Layout.HEADER_ROW1_Y, "", light_blue, False),
+        (Layout.HEADER_COL2_LABEL_X, Layout.HEADER_ROW2_Y, "Test Date", black, False),
+        (Layout.HEADER_COL2_VALUE_X, Layout.HEADER_ROW2_Y, test_date, light_blue, True),
+
+        (Layout.RIGHT_COL_LABEL_X, Layout.DATA_LOGGER_Y, "Data Logger", black, False),
+        (Layout.RIGHT_COL_VALUE_X, Layout.DATA_LOGGER_Y, data_logger, light_blue, True),
+        (Layout.RIGHT_COL_LABEL_X, Layout.SERIAL_NO_Y, "Serial No.", black, False),
+        (Layout.RIGHT_COL_VALUE_X, Layout.SERIAL_NO_Y, serial_number, light_blue, True),
+
+        (Layout.RIGHT_COL_LABEL_X, Layout.OPERATIVE_Y, "Operative:", black, False),
+        (Layout.OPERATIVE_VALUE_X, Layout.OPERATIVE_Y, "", light_blue, False),
+    ]
+
     draw_all_text(pdf, pdf_text_positions)
     draw_footer_metadata(pdf, test_metadata)
     return pdf
