@@ -124,16 +124,8 @@ def plot_calibration_data(cleaned_data, channel_index=None):
     # Create axes
     fig, ax_p = plt.subplots(figsize=(11.96, 8.49))
 
-    # Determine label based on channel_index
-    if channel_index is not None:
-        if channel_index <= 8:
-            p_label = "Calibrated Channel (µA)"
-        elif channel_index == 9:
-            p_label = "Calibrated Channel (mV)"
-        else:
-            p_label = "Calibrated Channel"
-    else:
-        p_label = "Calibrated Channel"
+    # All calibration plots use "Counts" for the Y-axis title.
+    p_label = "Counts"
 
     # Plot calibrated channel (left)
     p_line = ax_p.plot(df["Datetime"], df["Calibrated Channel"], label=p_label, color="#FF0000", lw=1)[0]
