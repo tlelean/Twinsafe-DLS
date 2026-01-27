@@ -101,16 +101,10 @@ def calculate_succesful_calibration(cleaned_data, calibration_indices, calibrati
 
     channel_index = calibration_info['channel_index']
 
-    if channel_index <= 12:
+    if channel_index <= 8:
         applied_values = [4000, 8000, 12000, 16000, 20000]
         index_labels = ['Applied (µA)', 'Counts (avg)', 'Converted (µA)', 'Abs Error (µA) - ±3.6 µA']
-    elif channel_index <= 15:
-        applied_values = [0, 2500, 5000, 7500, 10000]
-        index_labels = ['Applied (mV)', 'Counts (avg)', 'Converted (mV)', 'Abs Error (mV) - ±1.0 mV']
-    elif channel_index <= 16:
-        applied_values = [-10000, -5000, 0, 5000, 10000]
-        index_labels = ['Applied (mV)', 'Counts (avg)', 'Converted (mV)', 'Abs Error (mV) - ±1.0 mV']
-    elif channel_index <= 23:
+    elif channel_index == 9:
         applied_values = [-5.89, 9.28, 24.46, 39.64, 54.81]
         index_labels = ['Applied (mV)', 'Counts (avg)', 'Converted (mV)', 'Abs Error (mV) - ±0.12 mV']
     else:
