@@ -238,7 +238,7 @@ class CalibrationReportGenerator(BaseReportGenerator):
                 expected_series,
             )
 
-        figure, ax = plot_calibration_data(self.cleaned_data)
+        figure, ax = plot_calibration_data(self.cleaned_data, channel_index=calibration_info.get("channel_index"))
 
         # Add calibration markers to plot
         for phase in calibration_indices.columns:
