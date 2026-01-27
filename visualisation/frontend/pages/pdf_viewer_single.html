@@ -161,6 +161,7 @@
       if (!filename || typeof filename !== "string") return null;
 
       const base = filename.split("/").pop() || "";
+      if (base.startsWith("Calibration_")) return null;
       const parts = base.split("_");
 
       return parts.length >= 3 ? parts[2] : null;
@@ -190,7 +191,9 @@
 
     async function postStatusForCurrentPdf(isPassBool) {
       const unique = getUniqueFromFilename(currentFilename);
-      if (!unique) throw new Error(`Could not parse unique number from filename: ${currentFilename}`);
+      if (!unique) {
+        return;
+      }
 
       const url = `${PDF_STATUS_BASE}/${encodeURIComponent(unique)}`;
 
