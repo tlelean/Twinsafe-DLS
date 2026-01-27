@@ -530,6 +530,15 @@ def draw_calibration_test_details(test_metadata, pdf_output_path):
 
     # Metadata fields: Test Date, Data Logger, Serial Number
     test_date = test_metadata.get("Test Date", "")
+    if not test_date:
+        dt_str = test_metadata.get("Date Time", "")
+        if dt_str:
+            try:
+                # Example: "27-01-2026_11-46-52" -> "27/01/2026"
+                test_date = dt_str.split("_")[0].replace("-", "/")
+            except Exception:
+                test_date = dt_str
+
     data_logger = test_metadata.get("Data Logger", "")
     serial_number = test_metadata.get("Serial Number", "")
 
