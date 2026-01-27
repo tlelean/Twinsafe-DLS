@@ -556,6 +556,7 @@ def draw_calibration_test_details(test_metadata, pdf_output_path, channel_index=
 
     data_logger = test_metadata.get("Data Logger", "")
     serial_number = test_metadata.get("Serial Number", "")
+    operative = test_metadata.get("Operative", "")
 
     pdf_text_positions = [
         (Layout.HEADER_COL1_LABEL_X, Layout.HEADER_ROW1_Y, "OTS Number", black, False),
@@ -578,7 +579,7 @@ def draw_calibration_test_details(test_metadata, pdf_output_path, channel_index=
         (Layout.RIGHT_COL_VALUE_X, Layout.SERIAL_NO_Y, serial_number, light_blue, True),
 
         (Layout.RIGHT_COL_LABEL_X, Layout.OPERATIVE_Y, "Operative:", black, False),
-        (Layout.OPERATIVE_VALUE_X, Layout.OPERATIVE_Y, "", light_blue, True),
+        (Layout.OPERATIVE_VALUE_X, Layout.OPERATIVE_Y, operative, light_blue, True),
     ]
 
     draw_all_text(pdf, pdf_text_positions)
