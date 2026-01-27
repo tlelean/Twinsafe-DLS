@@ -124,12 +124,15 @@ def plot_calibration_data(cleaned_data, channel_index=None):
     # Create axes
     fig, ax_p = plt.subplots(figsize=(11.96, 8.49))
 
+    # Legend label should show Channel "index"
+    legend_label = f"Channel {channel_index}" if channel_index is not None else "Channel"
+
     # All calibration plots use "Counts" for the Y-axis title.
-    p_label = "Counts"
+    y_label = "Counts"
 
     # Plot calibrated channel (left)
-    p_line = ax_p.plot(df["Datetime"], df["Calibrated Channel"], label=p_label, color="#FF0000", lw=1)[0]
-    ax_p.set_ylabel(p_label, color="#FF0000")
+    p_line = ax_p.plot(df["Datetime"], df["Calibrated Channel"], label=legend_label, color="#FF0000", lw=1)[0]
+    ax_p.set_ylabel(y_label, color="#FF0000")
     ax_p.tick_params(axis="y", colors="#FF0000")
     ax_p.spines["top"].set_visible(False)
     ax_p.spines["right"].set_visible(False)
@@ -145,7 +148,7 @@ def plot_calibration_data(cleaned_data, channel_index=None):
         ax_p.set_xticks(pd.date_range(x_min, x_max, periods=10))
 
     # Legend + layout
-    fig.legend([p_line], [p_label], loc="lower center", ncol=1, frameon=False, bbox_to_anchor=(0.5, 0.05))
+    fig.legend([p_line], [legend_label], loc="lower center", ncol=1, frameon=False, bbox_to_anchor=(0.5, 0.05))
     fig.tight_layout(rect=[0, 0.075, 1, 1])
 
     return fig, ax_p
