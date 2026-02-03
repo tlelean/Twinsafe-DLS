@@ -252,7 +252,7 @@ def draw_headers(pdf, test_metadata, light_blue):
     )
 
 
-def build_production_text_positions(test_metadata, channel_info, light_blue, black, breakout_torque=None, running_torque=None, allowable_drop=None):
+def build_production_text_positions(test_metadata, channel_info, light_blue, black, breakout_torque=None, running_torque=None):
     """Build text position list for production reports."""
     # Parse test date from Date Time metadata
     test_date = ""
@@ -289,13 +289,13 @@ def build_production_text_positions(test_metadata, channel_info, light_blue, bla
         (Layout.RIGHT_COL_LABEL_X, (Layout.TRANSDUCERS_Y - Layout.TRANSDUCER_ROW_HEIGHT * 2), "Test Pressure", black, False),
         (Layout.RIGHT_COL_VALUE_X, (Layout.TRANSDUCERS_Y - Layout.TRANSDUCER_ROW_HEIGHT * 2), f"{test_metadata.get('Test Pressure', '0')} psi", light_blue, True),
         (Layout.RIGHT_COL_LABEL_X, (Layout.TRANSDUCERS_Y - Layout.TRANSDUCER_ROW_HEIGHT * 3), "Max Pressure", black, False),
-        (Layout.RIGHT_COL_VALUE_X, (Layout.TRANSDUCERS_Y - Layout.TRANSDUCER_ROW_HEIGHT * 3), f"{int(min(int(test_metadata.get('Test Pressure', '0')) * 1.05, int(test_metadata.get('Test Pressure', '0')) + 500))} psi", light_blue, True),
+        (Layout.RIGHT_COL_VALUE_X, (Layout.TRANSDUCERS_Y - Layout.TRANSDUCER_ROW_HEIGHT * 3), f"{test_metadata.get('Max Pressure', '0')} psi", light_blue, True),
         (Layout.RIGHT_COL_LABEL_X, (Layout.TRANSDUCERS_Y - Layout.TRANSDUCER_ROW_HEIGHT * 4), "Breakout Torque", black, False),
         (Layout.RIGHT_COL_VALUE_X, (Layout.TRANSDUCERS_Y - Layout.TRANSDUCER_ROW_HEIGHT * 4), breakout_display, light_blue, False),
         (Layout.RIGHT_COL_LABEL_X, (Layout.TRANSDUCERS_Y - Layout.TRANSDUCER_ROW_HEIGHT * 5), "Running Torque", black, False),
         (Layout.RIGHT_COL_VALUE_X, (Layout.TRANSDUCERS_Y - Layout.TRANSDUCER_ROW_HEIGHT * 5), running_display, light_blue, False),
         (Layout.RIGHT_COL_LABEL_X, (Layout.TRANSDUCERS_Y - Layout.TRANSDUCER_ROW_HEIGHT * 6), "Allowable Drop", black, False),
-        (Layout.RIGHT_COL_VALUE_X, (Layout.TRANSDUCERS_Y - Layout.TRANSDUCER_ROW_HEIGHT * 6), f"{allowable_drop} psi", light_blue, False),
+        (Layout.RIGHT_COL_VALUE_X, (Layout.TRANSDUCERS_Y - Layout.TRANSDUCER_ROW_HEIGHT * 6), f"{test_metadata.get('Allowable Drop', '0')} psi", light_blue, False),
 
         (Layout.RIGHT_COL_LABEL_X, Layout.DATA_LOGGER_Y, "Data Logger", black, False),
         (Layout.RIGHT_COL_VALUE_X, Layout.DATA_LOGGER_Y, test_metadata.get('Data Logger', ''), light_blue, True),
@@ -492,7 +492,7 @@ def draw_regression_table(
     table.drawOn(pdf_canvas, x, draw_y)
 
 
-def draw_production_test_details(test_metadata, channel_info, pdf_output_path, cleaned_data, transducer_code, allowable_drop, breakout_torque, running_torque):
+def draw_production_test_details(test_metadata, channel_info, pdf_output_path, cleaned_data, transducer_code, breakout_torque, running_torque):
     """Generate production test details PDF."""
     pdf = canvas.Canvas(str(pdf_output_path), pagesize=landscape(A4))
     pdf.setStrokeColor(colors.black)
@@ -500,7 +500,7 @@ def draw_production_test_details(test_metadata, channel_info, pdf_output_path, c
     light_blue = Color(0.325, 0.529, 0.761)
     black = Color(0, 0, 0)
     draw_headers(pdf, test_metadata, light_blue)
-    pdf_text_positions = build_production_text_positions(test_metadata, channel_info, light_blue, black, breakout_torque, running_torque, allowable_drop)
+    pdf_text_positions = build_production_text_positions(test_metadata, channel_info, light_blue, black, breakout_torque, running_torque)
     
     pdf_text_positions += build_production_transducer_positions(transducer_code, light_blue)
     draw_all_text(pdf, pdf_text_positions)
