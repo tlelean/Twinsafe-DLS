@@ -131,6 +131,18 @@ class ProductionReportGenerator(BaseReportGenerator):
             "Ambient Temperature"
         ]].copy()
 
+        # Truncate data if end_of_test is specified (+ 10 seconds)
+        end_of_test = channel_info.get("end_of_test")
+        if end_of_test:
+            end_dt = pd.to_datetime(
+                end_of_test,
+                format="%Y-%m-%dT%H:%M:%S.%f",
+                errors="coerce",
+            )
+            if pd.notna(end_dt):
+                end_limit = end_dt + pd.Timedelta(seconds=10)
+                cleaned_data = cleaned_data[cleaned_data["Datetime"] <= end_limit]
+
         # Copy metadata so you don't mutate shared dict
         metadata = dict(self.test_metadata)
         metadata["Unique Number"] = unique_number
@@ -165,7 +177,8 @@ class ProductionReportGenerator(BaseReportGenerator):
         
         # Calculate allowable drop (typically 10% of test pressure)
         test_pressure = float(self.test_metadata.get('Test Pressure', '0') or 0)
-        allowable_drop = int(self.test_metdata.get('Max Pressure', '0') - test_pressure) if test_pressure > 0 else 0
+        max_pressure = float(self.test_metadata.get('Max Pressure', '0') or 0)
+        allowable_drop = int(max_pressure - test_pressure) if test_pressure > 0 else 0
 
         # Create PDF with test details
         pdf = draw_production_test_details(
