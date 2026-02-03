@@ -165,7 +165,7 @@ class ProductionReportGenerator(BaseReportGenerator):
         
         # Calculate allowable drop (typically 10% of test pressure)
         test_pressure = float(self.test_metadata.get('Test Pressure', '0') or 0)
-        allowable_drop = int(test_pressure * 0.1) if test_pressure else 0
+        allowable_drop = int(self.test_metdata.get('Max Pressure', '0') - test_pressure) if test_pressure > 0 else 0
 
         # Create PDF with test details
         pdf = draw_production_test_details(
