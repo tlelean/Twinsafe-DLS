@@ -175,10 +175,13 @@ class ProductionReportGenerator(BaseReportGenerator):
         breakout_torque = channel_info.get("breakout_torque", 0)
         running_torque = channel_info.get("running_torque", 0)
         
-        # Calculate allowable drop (typically 10% of test pressure)
+        # Calculate Max Pressure and Allowable Drop
         test_pressure = float(self.test_metadata.get('Test Pressure', '0') or 0)
-        max_pressure = float(self.test_metadata.get('Max Pressure', '0') or 0)
+        max_pressure = int(min(test_pressure * 1.05, test_pressure + 500))
         allowable_drop = int(max_pressure - test_pressure) if test_pressure > 0 else 0
+
+        metadata["Max Pressure"] = max_pressure
+        metadata["Allowable Drop"] = allowable_drop
 
         # Create PDF with test details
         pdf = draw_production_test_details(
@@ -187,7 +190,6 @@ class ProductionReportGenerator(BaseReportGenerator):
             unique_path,
             cleaned_data,
             transducer_code,
-            allowable_drop,
             breakout_torque,
             running_torque
         )
