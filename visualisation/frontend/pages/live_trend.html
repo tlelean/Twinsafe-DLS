@@ -212,8 +212,26 @@
 
     // === INIT ===
     document.addEventListener('DOMContentLoaded', () => {
+      // Load from sessionStorage
+      const savedTimeWindow = sessionStorage.getItem('liveTrend_timeWindow');
+      if (savedTimeWindow) {
+        timeWindow = parseInt(savedTimeWindow, 10);
+        timeWindowSelect.value = savedTimeWindow;
+      }
+
+      const savedPaused = sessionStorage.getItem('liveTrend_paused');
+      if (savedPaused !== null) {
+        liveUpdatesPaused = savedPaused === 'true';
+      }
+
+      const savedMeasurementMode = sessionStorage.getItem('liveTrend_measurementMode');
+      if (savedMeasurementMode !== null) {
+        measurementModeActive = savedMeasurementMode === 'true';
+      }
+
       timeWindowSelect.addEventListener('change', e => {
         timeWindow = parseInt(e.target.value, 10);
+        sessionStorage.setItem('liveTrend_timeWindow', timeWindow);
         // Reload historical.csv using the new window, and restart live streaming
         loadInitialCSV();
       });
@@ -298,6 +316,7 @@
 
     function toggleLiveUpdates() {
       liveUpdatesPaused = !liveUpdatesPaused;
+      sessionStorage.setItem('liveTrend_paused', liveUpdatesPaused);
       if (liveUpdatesPaused) {
         stopLivePlot();
       } else {
@@ -751,7 +770,9 @@
 
         initialisePlotFromSamples(samples);
         hideLoading();
-        startLivePlot();
+        if (!liveUpdatesPaused) {
+          startLivePlot();
+        }
       } catch (e) {
         if (retries > 0) setTimeout(() => loadInitialCSV(retries - 1, delay), delay);
         else showLoading(`Failed to load history after retries: ${e.message}`);
@@ -1064,8 +1085,7 @@
           updateChartDecimated();
           updatePinnedToLatest(true);
           if (measurementModeActive) {
-            ensureMeasurementCursors();
-            syncMeasurementShapes();
+            enableMeasurementMode();
           }
         })
         .catch(() => {});
@@ -1385,6 +1405,7 @@
 
     function enableMeasurementMode() {
       measurementModeActive = true;
+      sessionStorage.setItem('liveTrend_measurementMode', measurementModeActive);
       skipAnchorSnapOnNextRelayout = false;
       measurementOverlay.classList.remove('hidden');
       updatePinnedHoverConstraints();
@@ -1406,6 +1427,7 @@
 
     function disableMeasurementMode() {
       measurementModeActive = false;
+      sessionStorage.setItem('liveTrend_measurementMode', measurementModeActive);
       measurementOverlay.classList.add('hidden');
       measurementEditRevision += 1;
       updatePinnedHoverConstraints();
