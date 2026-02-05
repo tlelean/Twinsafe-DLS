@@ -2,3 +2,8 @@ fastapi
 uvicorn
 opcua
 openpyxl
+pandas
+matplotlib
+PyMuPDF
+reportlab
+numpy
