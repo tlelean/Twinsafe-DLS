@@ -6,8 +6,8 @@ PLC_ENDPOINT = "opc.tcp://localhost:4840"
 # Use relative path for development, absolute path for production
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
 
-PDF_DIR = Path("/var/opt/codesys/PlcLogic/trend_data/static/pdfs")
-HISTORICAL_CSV = Path("/var/opt/codesys/PlcLogic/trend_data/historical.csv")
+PDF_DIR = Path("/var/opt/codesys/PlcLogic/backend/pdfs")
+HISTORICAL_CSV = Path("/var/opt/codesys/PlcLogic/backend/historical.csv")
 
 TEST_DETAILS_DIR = Path("/var/opt/codesys/PlcLogic/Test Details")
 
