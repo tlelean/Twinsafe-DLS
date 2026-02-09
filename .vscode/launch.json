@@ -1,0 +1,17 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Python: Generate PDF",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/chart_generation/main.py",
+      "args": [
+            "/mnt/otsdls/Incoming/09-02-2026_09-38-22/09-02-2026_09-38-22_data_1.csv",
+            "/mnt/otsdls/Incoming/09-02-2026_09-38-22/09-02-2026_09-38-22_details.json",
+            "${workspaceFolder}/output/"],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}"
+    }
+    ]
+}
