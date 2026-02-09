@@ -103,20 +103,25 @@ def calculate_succesful_calibration(cleaned_data, calibration_indices, calibrati
 
     if channel_index <= 8:
         applied_values = [4000, 8000, 12000, 16000, 20000]
+        regression_expected_values = [0, 1953125, 3906250, 5859375, 7812500]
         index_labels = ['Applied (µA)', 'Counts (avg)', 'Converted (µA)', 'Abs Error (µA) - ±3.6 µA']
     elif channel_index == 9:
         applied_values = [-5.89, 9.28, 24.46, 39.64, 54.81]
+        regression_expected_values = [-2700, 1405, 5510, 9615, 13720]
         index_labels = ['Applied (mV)', 'Counts (avg)', 'Converted (mV)', 'Abs Error (mV) - ±0.12 mV']
     else:
         applied_values = [0, 0, 0, 0, 0]
+        regression_expected_values = [0, 0, 0, 0, 0]
         index_labels = ['Applied', 'Counts (avg)', 'Converted', 'Abs Error']
 
     # Adjust applied_values length if necessary (though normally it's 5)
     num_points = len(calibration_indices.columns)
     if len(applied_values) > num_points:
         applied_values = applied_values[:num_points]
+        regression_expected_values = regression_expected_values[:num_points]
     elif len(applied_values) < num_points:
         applied_values = applied_values + [0] * (num_points - len(applied_values))
+        regression_expected_values = regression_expected_values + [0] * (num_points - len(regression_expected_values))
 
     slope = (applied_values[-1] - applied_values[0]) / calibration_info['max_range']
     intercept = applied_values[0]
@@ -134,7 +139,7 @@ def calculate_succesful_calibration(cleaned_data, calibration_indices, calibrati
         error = applied_values[i] - converted
 
         counts_series.loc[i+1] = counts
-        expected_series.loc[i+1] = applied_values[i]
+        expected_series.loc[i+1] = regression_expected_values[i]
         abs_error_series.loc[i+1] = abs(error)
 
         display_table.loc[0, i+1] = applied_values[i]
