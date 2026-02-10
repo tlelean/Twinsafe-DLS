@@ -107,7 +107,7 @@ def calculate_succesful_calibration(cleaned_data, calibration_indices, calibrati
         index_labels = ['Applied (µA)', 'Counts (avg)', 'Converted (µA)', 'Abs Error (µA) - ±3.6 µA']
     elif channel_index == 9:
         applied_values = [-5.89, 9.28, 24.46, 39.64, 54.81]
-        regression_expected_values = [-2700, 1405, 5510, 9615, 13720]
+        regression_expected_values = [-2000, 1925, 5850, 9775, 13700]
         index_labels = ['Applied (mV)', 'Counts (avg)', 'Converted (mV)', 'Abs Error (mV) - ±0.12 mV']
     else:
         applied_values = [0, 0, 0, 0, 0]
@@ -123,8 +123,8 @@ def calculate_succesful_calibration(cleaned_data, calibration_indices, calibrati
         applied_values = applied_values + [0] * (num_points - len(applied_values))
         regression_expected_values = regression_expected_values + [0] * (num_points - len(regression_expected_values))
 
-    slope = (applied_values[-1] - applied_values[0]) / calibration_info['max_range']
-    intercept = applied_values[0]
+    slope = (applied_values[-1] - applied_values[0]) / calibration_info['max_range']    
+    intercept = applied_values[0] - (slope * regression_expected_values[0])
 
     counts_series = pd.Series(dtype=float)
     expected_series = pd.Series(dtype=float)
@@ -134,7 +134,6 @@ def calculate_succesful_calibration(cleaned_data, calibration_indices, calibrati
         start_idx = calibration_indices.iloc[0, i]
         end_idx = calibration_indices.iloc[1, i]
 
-        print(cleaned_data)
         counts = cleaned_data.loc[start_idx:end_idx, "Calibrated Channel"].mean()
         converted = (slope * counts) + intercept
         error = applied_values[i] - converted
