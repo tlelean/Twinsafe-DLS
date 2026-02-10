@@ -7,9 +7,9 @@
       "request": "launch",
       "program": "${workspaceFolder}/chart_generation/main.py",
       "args": [
-            "/mnt/otsdls/Calibration/DLSTS001/09-02-2026/Data/09-02-2026_09-38-22_data_1.csv",
-            "/mnt/otsdls/Calibration/DLSTS001/09-02-2026/Data/09-02-2026_09-38-22_details.json",
-            "${workspaceFolder}/output/"],
+            "/mnt/otsdls/Calibration/DLSTS001/09-02-2026/Data/09-02-2026_16-26-03_data_1.csv",
+            "/mnt/otsdls/Calibration/DLSTS001/09-02-2026/Data/09-02-2026_16-26-03_details.json",
+            "/mnt/otsdls/Calibration/DLSTS001/09-02-2026/PDF/Pass"],
       "console": "integratedTerminal",
       "cwd": "${workspaceFolder}"
     }

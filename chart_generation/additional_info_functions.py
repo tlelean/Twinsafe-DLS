@@ -134,6 +134,7 @@ def calculate_succesful_calibration(cleaned_data, calibration_indices, calibrati
         start_idx = calibration_indices.iloc[0, i]
         end_idx = calibration_indices.iloc[1, i]
 
+        print(cleaned_data)
         counts = cleaned_data.loc[start_idx:end_idx, "Calibrated Channel"].mean()
         converted = (slope * counts) + intercept
         error = applied_values[i] - converted

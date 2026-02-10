@@ -40,6 +40,8 @@ def prepare_primary_data(primary_data_path: str, info_obj):
     if isinstance(info_obj, dict) and "channel_index" in info_obj:
         # Calibration mode
         channel_index = info_obj["channel_index"]
+        if channel_index == 9:
+            channel_index = 'Ambient Temperature'
         active_channels = ["Calibrated Channel"]
 
         col_name = str(channel_index)
@@ -83,7 +85,7 @@ def prepare_primary_data(primary_data_path: str, info_obj):
 
     # Keep only Datetime, active channel data, and Ambient Temperature
     if isinstance(info_obj, dict) and "channel_index" in info_obj:
-        required_columns = ["Datetime", "Calibrated Channel", "Ambient Temperature"]
+        required_columns = ["Datetime", "Calibrated Channel"]
     else:
         required_columns = ["Datetime"] + active_channels + ["Ambient Temperature"]
     # Filter to only columns that actually exist to avoid KeyError
