@@ -10,6 +10,9 @@ env/
 .venv/
 .env/
 
+# VS Code settings (if you don’t want them in git)
+.vscode/
+
 # Byte-compiled / temporary files
 *.log
 *.tmp
@@ -25,3 +28,8 @@ htmlcov/
 build/
 dist/
 *.egg-info/
+
+# static files
+*.json
+*.csv
+*.pdf
