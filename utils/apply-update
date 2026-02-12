@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Moves the staged DLS.app and DLS.crc (and visu contents) into place, then restarts Codesys.
+# Safer updater: stop Codesys, move app/crc into place, sync visu, start Codesys, verify.
 
 set -euo pipefail
 
@@ -16,12 +16,14 @@ CRC_DST="$DST_DIR/DLS.crc"
 
 # --- sanity checks ---
 if [ ! -f "$APP_SRC" ] || [ ! -f "$CRC_SRC" ]; then
-    echo "❌ Missing update files."
-    echo "Expected:"
-    echo "  $APP_SRC"
-    echo "  $CRC_SRC"
-    exit 1
+  echo "❌ Missing update files:"
+  echo "  $APP_SRC"
+  echo "  $CRC_SRC"
+  exit 1
 fi
+
+echo "🛑 Stopping $SERVICE..."
+sudo systemctl stop "$SERVICE"
 
 echo "🔄 Moving DLS.app and DLS.crc into place..."
 sudo mv -f "$APP_SRC" "$APP_DST"
@@ -29,23 +31,30 @@ sudo mv -f "$CRC_SRC" "$CRC_DST"
 
 # --- handle visu ---
 if [ -d "$VISU_SRC" ]; then
-    echo "🖥️  Updating visu files..."
-    sudo mkdir -p "$VISU_DST"
-    # Copy all visu contents (overwrite, preserve structure)
-    sudo rsync -a --delete "$VISU_SRC"/ "$VISU_DST"/
-    # Optional: clean up visu source folder
-    sudo rm -rf "$VISU_SRC"
+  echo "🖥️  Updating visu files..."
+  sudo mkdir -p "$VISU_DST"
+  sudo rsync -a --delete "$VISU_SRC"/ "$VISU_DST"/
+  sudo rm -rf "$VISU_SRC"
 else
-    echo "ℹ️  No visu folder found in updates — skipping visu copy."
+  echo "ℹ️  No visu folder found in updates — skipping visu copy."
 fi
 
-echo "♻️ Restarting $SERVICE..."
-sudo systemctl restart "$SERVICE"
+echo "♻️ Starting $SERVICE..."
+sudo systemctl start "$SERVICE"
 
-if systemctl is-active --quiet "$SERVICE"; then
-    echo "✅ Update applied successfully and $SERVICE restarted."
-else
-    echo "⚠️ Files moved, but $SERVICE failed to start. Check logs with:"
-    echo "   journalctl -u $SERVICE -xe"
-    exit 2
+echo "🔎 Verifying service + port..."
+sudo systemctl is-active --quiet "$SERVICE" || {
+  echo "⚠️ $SERVICE failed to start. Logs:"
+  sudo journalctl -u "$SERVICE" -n 80 --no-pager
+  exit 2
+}
+
+# Give it a moment to bind sockets
+sleep 2
+if ! sudo ss -tulpn | grep -q ":8080"; then
+  echo "⚠️ $SERVICE is running but 8080 is not listening."
+  echo "Check whether WebVisu is enabled in the project and which port it's configured to use."
+  exit 3
 fi
+
+echo "✅ Update applied and WebVisu port is listening."
