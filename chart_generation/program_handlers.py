@@ -6,6 +6,14 @@ import shutil
 from typing import List, Dict, Any
 import pandas as pd
 from concurrent.futures import ProcessPoolExecutor
+import sys
+
+# Add project root to sys.path to ensure we can import the central config
+root = Path(__file__).resolve().parent.parent
+if str(root) not in sys.path:
+    sys.path.append(str(root))
+
+from shared_config import PDF_DIR
 
 from graph_plotter import (
     plot_production_channel_data,
@@ -35,7 +43,7 @@ class BaseReportGenerator:
         self.active_channels = kwargs.get("active_channels")
         self.cleaned_data = kwargs.get("cleaned_data")
         self.info_obj = kwargs.get("info_obj")
-        self.pdf_copy_dir = Path("/home/mechatronics/Twinsafe-DLS/visualisation/static/pdf")
+        self.pdf_copy_dir = PDF_DIR
 
         if isinstance(self.test_metadata, pd.DataFrame):
             self.test_metadata = self.test_metadata.iloc[:, 0].to_dict()

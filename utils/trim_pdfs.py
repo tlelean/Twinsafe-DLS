@@ -4,8 +4,12 @@ from pathlib import Path
 import sys
 import traceback
 
-# Folder where PDFs are stored
-PDF_DIR = Path("/home/mechatronics/Twinsafe-DLS/visualisation/static/pdf")
+# Add project root to sys.path to ensure we can import the central config
+root = Path(__file__).resolve().parent.parent
+if str(root) not in sys.path:
+    sys.path.append(str(root))
+
+from shared_config import PDF_DIR
 
 # Max number of PDFs to keep
 MAX_PDFS = 100
