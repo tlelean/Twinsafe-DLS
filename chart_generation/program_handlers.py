@@ -35,7 +35,7 @@ class BaseReportGenerator:
         self.active_channels = kwargs.get("active_channels")
         self.cleaned_data = kwargs.get("cleaned_data")
         self.info_obj = kwargs.get("info_obj")
-        self.pdf_copy_dir = Path("/var/opt/codesys/PlcLogic/backend/pdfs")
+        self.pdf_copy_dir = Path("/home/mechatronics/Twinsafe-DLS/visualisation/static/pdf")
 
         if isinstance(self.test_metadata, pd.DataFrame):
             self.test_metadata = self.test_metadata.iloc[:, 0].to_dict()

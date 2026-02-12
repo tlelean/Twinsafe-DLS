@@ -80,8 +80,7 @@
     const PDF_STATUS_BASE = "/api/pdf/status";   // POST /api/pdf/status/{unique}
     const PDF_CLOSE_URL   = "/api/pdf-close/";   // POST when finished
 
-    pdfjsLib.GlobalWorkerOptions.workerSrc =
-      "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "../assets/pdf.min.js";
 
     // -----------------------------
     // Elements

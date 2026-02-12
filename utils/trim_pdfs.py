@@ -5,11 +5,10 @@ import sys
 import traceback
 
 # Folder where PDFs are stored
-PDF_DIR = Path("/var/opt/codesys/PlcLogic/trend_data/static/pdfs")
+PDF_DIR = Path("/home/mechatronics/Twinsafe-DLS/visualisation/static/pdf")
 
 # Max number of PDFs to keep
 MAX_PDFS = 100
-
 
 def trim_pdfs():
     try:
