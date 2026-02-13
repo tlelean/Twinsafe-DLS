@@ -52,7 +52,7 @@
     const pdfDirBaseUrl = '/api/pdf';
     const listEndpoint  = '/api/pdf-list';
 
-    pdfjsLib.GlobalWorkerOptions.workerSrc = "../assets/pdf.min.js";
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "../assets/pdf.worker.min.js";
 
     const canvas      = document.getElementById('pdfCanvas');
     const ctx         = canvas.getContext('2d');

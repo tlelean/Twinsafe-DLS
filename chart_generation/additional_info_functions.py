@@ -70,7 +70,7 @@ def locate_key_time_rows(cleaned_data, hold_info: pd.Series, channel_unique_numb
 
         display_table_data['Datetime'][i] = ts.strftime("%d/%m/%Y %H:%M:%S")
         display_table_data[pressure_col_display][i] = int(pressure_val)
-        display_table_data['Ambient Temperature (°C)'][i] = temp_val
+        display_table_data['Ambient Temperature (°C)'][i] = int(temp_val)
 
     holds_indices = pd.DataFrame(index_data)
     display_table = pd.DataFrame(display_table_data)
