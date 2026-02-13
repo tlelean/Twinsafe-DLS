@@ -139,7 +139,7 @@ class ProductionReportGenerator(BaseReportGenerator):
             "Ambient Temperature"
         ]].copy()
 
-        # Truncate data if end_of_test is specified (+ 10 seconds)
+        # Truncate or extend data if end_of_test is specified (+ 10 seconds)
         end_of_test = channel_info.get("end_of_test")
         if end_of_test:
             end_dt = pd.to_datetime(
@@ -149,7 +149,19 @@ class ProductionReportGenerator(BaseReportGenerator):
             )
             if pd.notna(end_dt):
                 end_limit = end_dt + pd.Timedelta(seconds=10)
-                cleaned_data = cleaned_data[cleaned_data["Datetime"] <= end_limit]
+
+                if not cleaned_data.empty:
+                    max_dt = cleaned_data["Datetime"].max()
+
+                    if max_dt > end_limit:
+                        cleaned_data = cleaned_data[cleaned_data["Datetime"] <= end_limit]
+
+                    if not cleaned_data.empty:
+                        max_dt = cleaned_data["Datetime"].max()
+                        if pd.notna(max_dt) and max_dt < end_limit:
+                            last_row = cleaned_data.iloc[-1].copy()
+                            last_row["Datetime"] = end_limit
+                            cleaned_data = pd.concat([cleaned_data, pd.DataFrame([last_row])], ignore_index=True)
 
         # Copy metadata so you don't mutate shared dict
         metadata = dict(self.test_metadata)
