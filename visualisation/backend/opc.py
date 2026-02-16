@@ -179,16 +179,15 @@ class OpcUaWrapper:
     def read(self, key: str):
         """
         Read a value by logical key.
-        We only auto-retry on FuturesTimeoutError here.
-        BrokenPipeError etc. will bubble out so you can see them.
+        Retries on timeout or connection errors.
         """
         with self._lock:
             node, _ = self._get_node_entry(key)
 
             try:
                 return node.get_value()
-            except FuturesTimeoutError:
-                logger.warning("OPC: Timeout on read '%s', reconnecting and retrying", key)
+            except (FuturesTimeoutError, ConnectionError, OSError) as e:
+                logger.warning("OPC: Error on read '%s' (%s), reconnecting and retrying", key, e)
                 self._reconnect()
                 node, _ = self._get_node_entry(key)
                 return node.get_value()
@@ -201,8 +200,8 @@ class OpcUaWrapper:
             try:
                 node = self.client.get_node(nodeid)
                 return node.get_value()
-            except FuturesTimeoutError:
-                logger.warning("OPC: Timeout on read_direct '%s', reconnecting and retrying", nodeid)
+            except (FuturesTimeoutError, ConnectionError, OSError) as e:
+                logger.warning("OPC: Error on read_direct '%s' (%s), reconnecting and retrying", nodeid, e)
                 self._reconnect()
                 node = self.client.get_node(nodeid)
                 return node.get_value()
@@ -212,7 +211,7 @@ class OpcUaWrapper:
         Write a value by logical key.
         - Coerces value based on the node's data type.
         - Supports both scalars and arrays (Python list/tuple).
-        - On TimeoutError, reconnect and retry once.
+        - On TimeoutError or ConnectionError, reconnect and retry once.
         """
         with self._lock:
             node, vtype = self._get_node_entry(key)
@@ -227,12 +226,28 @@ class OpcUaWrapper:
 
             try:
                 node.set_value(ua.Variant(coerced, vtype))
-            except FuturesTimeoutError:
-                logger.warning("OPC: Timeout on write '%s', reconnecting and retrying", key)
+            except (FuturesTimeoutError, ConnectionError, OSError) as e:
+                logger.warning("OPC: Error on write '%s' (%s), reconnecting and retrying", key, e)
                 self._reconnect()
                 node, vtype = self._get_node_entry(key)
                 coerced = _coerce_for_type(vtype, value)
                 node.set_value(ua.Variant(coerced, vtype))
+
+    def write_direct(self, nodeid: str, value: Any) -> None:
+        """
+        Write a value directly by node ID.
+        """
+        with self._lock:
+            try:
+                node = self.client.get_node(nodeid)
+                vtype = node.get_data_type_as_variant_type()
+                node.set_value(ua.Variant(value, vtype))
+            except (FuturesTimeoutError, ConnectionError, OSError) as e:
+                logger.warning("OPC: Error on write_direct '%s' (%s), reconnecting and retrying", nodeid, e)
+                self._reconnect()
+                node = self.client.get_node(nodeid)
+                vtype = node.get_data_type_as_variant_type()
+                node.set_value(ua.Variant(value, vtype))
 
 # Single shared instance
 opc = OpcUaWrapper(PLC_ENDPOINT)
