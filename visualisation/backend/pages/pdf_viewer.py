@@ -43,31 +43,31 @@ def get_pdf(filename: str):
 
     return FileResponse(path=str(file_path), media_type="application/pdf", filename=file_path.name)
 
-def find_slot_for_unique(client, unique: str) -> int:
+def find_slot_for_unique(unique: str) -> int:
     unique = str(unique).strip()
 
     for slot, nodeid in UNIQUE_NUMBER_NODE_IDS.items():
-        val = client.get_node(nodeid).get_value()
+        val = opc.read_direct(nodeid)
         if str(val).strip() == unique:
             return slot
 
     raise ValueError(f"Unique number {unique} not found in slots")
 
-def write_passfail(client, unique: str, is_pass: bool):
-    slot = find_slot_for_unique(client, unique)
+def write_passfail(unique: str, is_pass: bool):
+    slot = find_slot_for_unique(unique)
     nodeid = STATUS_NODE_IDS[slot]  # this is Hold[slot].xPass
-    client.get_node(nodeid).set_value(bool(is_pass))
+    opc.write_direct(nodeid, bool(is_pass))
 
-def read_passfail(client, unique: str) -> bool:
-    slot = find_slot_for_unique(client, unique)
+def read_passfail(unique: str) -> bool:
+    slot = find_slot_for_unique(unique)
     nodeid = STATUS_NODE_IDS[slot]  # Hold[slot].xPass (bool)
-    val = client.get_node(nodeid).get_value()
+    val = opc.read_direct(nodeid)
     return bool(val)
 
 @router.post("/api/pdf/status/{unique}")
 def pdf_status(unique: str, payload: TestStatusPayload):
     try:
-        write_passfail(opc.client, unique, payload.status)  # status is bool
+        write_passfail(unique, payload.status)  # status is bool
         return {"message": "Status updated"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -84,7 +84,7 @@ def pdf_close():
 @router.get("/api/pdf/status/{unique}")
 def pdf_status(unique: str):
     try:
-        is_pass = read_passfail(opc.client, unique)
+        is_pass = read_passfail(unique)
         return {"status": is_pass}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
