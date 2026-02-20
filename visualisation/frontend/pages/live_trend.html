@@ -29,12 +29,6 @@
           <option value="300000">5m</option>
           <option value="900000">15m</option>
           <option value="1800000">30m</option>
-          <option value="3600000">1h</option>
-          <option value="7200000">2h</option>
-          <option value="14400000">4h</option>
-          <option value="28800000">8h</option>
-          <option value="43200000">12h</option>
-          <option value="86400000">24h</option>
         </select>
 
         <button
@@ -96,7 +90,7 @@
     // Master history for efficient calculations and decimation
     let masterTimestamps = []; // stores epoch ms
     let masterValues = [];     // Array of arrays
-    const MAX_HISTORY_POINTS = 864000; // 24 hours at 100ms
+    const MAX_HISTORY_POINTS = 30000; // max rows in historical.csv (trimmed to 30000)
 
     // Hover state
     let lastHoverTime = null;
@@ -154,9 +148,9 @@
       return low;
     }
 
-    // sampling / history (matches your CSV)
+    // sampling / history (matches your CSV trimmed to 30k rows)
     const SAMPLE_PERIOD_MS = 100;       // 100 ms logging
-    const MAX_POINTS = 864000;          // max rows in historical.csv
+    const MAX_POINTS = 30000;           // max rows in historical.csv (trimmed to 30000)
     const MAX_POINTS_PER_FLUSH = 150;   // max new samples per render tick
 
     const API = '/api';
