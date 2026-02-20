@@ -3,7 +3,7 @@ from opcua.ua import ExtensionObject
 from opcua.common.node import Node
 from typing import Dict, Tuple, Any
 from concurrent.futures import TimeoutError as FuturesTimeoutError
-from threading import Lock
+from threading import RLock
 import logging
 
 from .config import PLC_ENDPOINT, NODE_IDS
@@ -34,7 +34,7 @@ class _KeepAliveHandler:
 class OpcUaWrapper:
     def __init__(self, endpoint: str):
         self.endpoint = endpoint
-        self._lock = Lock()
+        self._lock = RLock()
         self.client: Client | None = None
         self.node_cache: Dict[str, Tuple[Node, ua.VariantType]] = {}
 
@@ -42,7 +42,10 @@ class OpcUaWrapper:
         self._sub = None
         self._keepalive_handle = None
 
-        self._connect()
+        try:
+            self._connect()
+        except Exception:
+            logger.error("OPC: Initial connection failed to %s. Will retry on first access.", endpoint)
 
     def _unwrap_extension_object(value):
         """
@@ -69,28 +72,48 @@ class OpcUaWrapper:
         Create a new client, connect, and rebuild the node cache.
         Also set up a keepalive subscription so the session never goes idle.
         """
-        logger.info("OPC: Connecting client to %s", self.endpoint)
-        self.client = Client(self.endpoint)
-        self.client.connect()
+        with self._lock:
+            if self.client is not None:
+                try:
+                    self.client.disconnect()
+                except Exception:
+                    pass
+                self.client = None
 
-        # 🔑 Teach the client about custom structs / ExtensionObjects
-        try:
-            self.client.load_type_definitions()
-            logger.info("OPC: Loaded data type definitions")
-        except Exception:
-            logger.exception("OPC: Failed to load data type definitions")
+            logger.info("OPC: Connecting client to %s", self.endpoint)
+            new_client = Client(self.endpoint)
+            try:
+                new_client.connect()
 
-        # Rebuild node cache
-        self.node_cache.clear()
-        for key, nodeid in NODE_IDS.items():
-            node = self.client.get_node(nodeid)
-            vtype = node.get_data_type_as_variant_type()
-            self.node_cache[key] = (node, vtype)
+                # 🔑 Teach the client about custom structs / ExtensionObjects
+                try:
+                    new_client.load_type_definitions()
+                    logger.info("OPC: Loaded data type definitions")
+                except Exception:
+                    logger.warning("OPC: Failed to load data type definitions (non-critical)")
 
-        logger.info("OPC: Connected and cached %d nodes", len(self.node_cache))
+                # Rebuild node cache
+                new_node_cache = {}
+                for key, nodeid in NODE_IDS.items():
+                    node = new_client.get_node(nodeid)
+                    vtype = node.get_data_type_as_variant_type()
+                    new_node_cache[key] = (node, vtype)
 
-        # Create or recreate keepalive subscription
-        self._setup_keepalive_subscription()
+                # Successfully connected and prepared
+                self.client = new_client
+                self.node_cache = new_node_cache
+                logger.info("OPC: Connected and cached %d nodes", len(self.node_cache))
+
+                # Create or recreate keepalive subscription
+                self._setup_keepalive_subscription()
+
+            except Exception:
+                logger.exception("OPC: Failed to connect to %s", self.endpoint)
+                try:
+                    new_client.disconnect()
+                except:
+                    pass
+                raise
 
     def _setup_keepalive_subscription(self) -> None:
         """
@@ -127,17 +150,18 @@ class OpcUaWrapper:
         Force a reconnect – you may still want this for explicit manual calls,
         but it will no longer be triggered automatically for BrokenPipe in read().
         """
-        logger.warning("OPC: Reconnecting client")
-        if self.client is not None:
-            try:
-                self.client.disconnect()
-            except Exception:
-                logger.exception("OPC: Error while disconnecting stale client")
+        with self._lock:
+            logger.warning("OPC: Reconnecting client")
+            if self.client is not None:
+                try:
+                    self.client.disconnect()
+                except Exception:
+                    logger.exception("OPC: Error while disconnecting stale client")
 
-        self.client = None
-        self._sub = None
-        self._keepalive_handle = None
-        self._connect()
+            self.client = None
+            self._sub = None
+            self._keepalive_handle = None
+            self._connect()
 
     # ------------------------
     # Helpers
@@ -176,63 +200,75 @@ class OpcUaWrapper:
     # ------------------------
     # Public API
     # ------------------------
+    def _execute_with_retry(self, operation, *args, **kwargs):
+        """
+        Execute an OPC operation with retry logic for connection errors.
+        """
+        max_retries = 3
+        for attempt in range(max_retries):
+            current_client = None
+            try:
+                with self._lock:
+                    if self.client is None:
+                        self._connect()
+                    current_client = self.client
+                    return operation(*args, **kwargs)
+            except (FuturesTimeoutError, BrokenPipeError, ConnectionError, OSError) as e:
+                logger.warning("OPC: Operation failed (attempt %d/%d): %s", attempt + 1, max_retries, e)
+                if attempt < max_retries - 1:
+                    with self._lock:
+                        # Only reconnect if the client hasn't been changed by another thread
+                        if self.client is current_client:
+                            try:
+                                self._reconnect()
+                            except Exception:
+                                logger.exception("OPC: Reconnection attempt failed")
+                        else:
+                            logger.info("OPC: Skipping reconnect as another thread already reconnected")
+                else:
+                    logger.error("OPC: Operation failed after %d retries", max_retries)
+                    raise
+            except Exception as e:
+                logger.exception("OPC: Unexpected error during operation")
+                raise
+
     def read(self, key: str):
         """
         Read a value by logical key.
-        We only auto-retry on FuturesTimeoutError here.
-        BrokenPipeError etc. will bubble out so you can see them.
+        Handles reconnection and retries automatically.
         """
-        with self._lock:
+        def _read_op():
             node, _ = self._get_node_entry(key)
+            return node.get_value()
 
-            try:
-                return node.get_value()
-            except FuturesTimeoutError:
-                logger.warning("OPC: Timeout on read '%s', reconnecting and retrying", key)
-                self._reconnect()
-                node, _ = self._get_node_entry(key)
-                return node.get_value()
+        return self._execute_with_retry(_read_op)
 
     def read_direct(self, nodeid: str):
         """
         Read a value directly by node ID (not using NODE_IDS mapping).
         """
-        with self._lock:
-            try:
-                node = self.client.get_node(nodeid)
-                return node.get_value()
-            except FuturesTimeoutError:
-                logger.warning("OPC: Timeout on read_direct '%s', reconnecting and retrying", nodeid)
-                self._reconnect()
-                node = self.client.get_node(nodeid)
-                return node.get_value()
+        return self._execute_with_retry(lambda: self.client.get_node(nodeid).get_value())
 
     def write(self, key: str, value: Any) -> None:
         """
         Write a value by logical key.
         - Coerces value based on the node's data type.
         - Supports both scalars and arrays (Python list/tuple).
-        - On TimeoutError, reconnect and retry once.
+        - Handles reconnection and retries automatically.
         """
-        with self._lock:
+        def _write_op():
             node, vtype = self._get_node_entry(key)
 
-            def _coerce_for_type(vtype: ua.VariantType, val: Any) -> Any:
-                # Reuse existing logic, but apply it per-element if needed
+            def _coerce_for_type(vt: ua.VariantType, val: Any) -> Any:
                 if isinstance(val, (list, tuple)):
-                    return [self._coerce_value(vtype, x) for x in val]
-                return self._coerce_value(vtype, val)
+                    return [self._coerce_value(vt, x) for x in val]
+                return self._coerce_value(vt, val)
 
             coerced = _coerce_for_type(vtype, value)
+            variant = ua.Variant(coerced, vtype)
+            node.set_value(variant)
 
-            try:
-                node.set_value(ua.Variant(coerced, vtype))
-            except FuturesTimeoutError:
-                logger.warning("OPC: Timeout on write '%s', reconnecting and retrying", key)
-                self._reconnect()
-                node, vtype = self._get_node_entry(key)
-                coerced = _coerce_for_type(vtype, value)
-                node.set_value(ua.Variant(coerced, vtype))
+        return self._execute_with_retry(_write_op)
 
 # Single shared instance
 opc = OpcUaWrapper(PLC_ENDPOINT)

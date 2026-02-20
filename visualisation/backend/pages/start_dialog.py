@@ -43,7 +43,7 @@ def update_start_dialog_state(payload: StartDialogState):
     except KeyError as exc:
         raise HTTPException(status_code=500, detail=f"Missing OPC node: {exc}") from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"OPC write failed: {exc}") from exc
+        raise HTTPException(status_code=503, detail=f"OPC write failed: {exc}") from exc
 
     return _read_start_dialog_state()
 
@@ -57,7 +57,7 @@ def _read_start_dialog_state() -> dict:
     except KeyError as exc:
         raise HTTPException(status_code=500, detail=f"Missing OPC node: {exc}") from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"OPC read failed: {exc}") from exc
+        raise HTTPException(status_code=503, detail=f"OPC read failed: {exc}") from exc
 
     return {
         "section_number": _to_text(section_number),

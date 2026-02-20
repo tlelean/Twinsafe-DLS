@@ -27,27 +27,29 @@ class LiveResponse(BaseModel):
 
 @router.get("/api/live", response_model=LiveResponse)
 def get_live_json():
-    if opc is None:
-        raise HTTPException(status_code=503, detail="OPC UA server not available")
-    
-    now = datetime.now(tz=timezone.utc)
+    try:
+        now = datetime.now(tz=timezone.utc)
 
-    # 9 analogue channels
-    channel_values = opc.read("channel_readings")[:9]
+        # 9 analogue channels
+        channel_values = opc.read("channel_readings")[:9]
 
-    channel_visibility = opc.read("channel_visibility")[:9]
-    
-    # Read unique numbers for channel names
-    channel_unique_numbers = []
-    for i in range(1, 10):
-        if i in UNIQUE_NUMBER_NODE_IDS:
-            try:
-                unique_num = opc.read_direct(UNIQUE_NUMBER_NODE_IDS[i])
-                channel_unique_numbers.append(str(unique_num) if unique_num is not None else CHANNEL_NAMES.get(i, f"Channel {i}"))
-            except:
+        channel_visibility = opc.read("channel_visibility")[:9]
+
+        # Read unique numbers for channel names
+        channel_unique_numbers = []
+        for i in range(1, 10):
+            if i in UNIQUE_NUMBER_NODE_IDS:
+                try:
+                    unique_num = opc.read_direct(UNIQUE_NUMBER_NODE_IDS[i])
+                    channel_unique_numbers.append(str(unique_num) if unique_num is not None else CHANNEL_NAMES.get(i, f"Channel {i}"))
+                except:
+                    channel_unique_numbers.append(CHANNEL_NAMES.get(i, f"Channel {i}"))
+            else:
                 channel_unique_numbers.append(CHANNEL_NAMES.get(i, f"Channel {i}"))
-        else:
-            channel_unique_numbers.append(CHANNEL_NAMES.get(i, f"Channel {i}"))
+    except KeyError as e:
+        raise HTTPException(status_code=500, detail=f"Missing OPC node configuration: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"OPC UA server communication error: {str(e)}")
 
     channels: List[ChannelReading] = []
     for i in range(9):

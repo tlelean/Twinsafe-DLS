@@ -88,6 +88,9 @@
     let timeWindow = 60000;
     let liveUpdatesPaused = false;
     let liveInterval = null;
+    let livePollingInterval = 100;
+    const MIN_POLLING_INTERVAL = 100;
+    const MAX_POLLING_INTERVAL = 5000;
     let renderInterval = null;
     let dataBuffer = [];
     let lastTimestamp = null;
@@ -798,8 +801,18 @@
           applyServerVisibility(sample.vis);
           requestPinnedUpdate();
         }
+
+        // Reset polling interval on success
+        livePollingInterval = MIN_POLLING_INTERVAL;
       } catch (e) {
         console.error('Live JSON fetch error:', e);
+        // Exponential backoff on failure
+        livePollingInterval = Math.min(MAX_POLLING_INTERVAL, livePollingInterval * 2);
+      } finally {
+        // Schedule next poll if not paused
+        if (!liveUpdatesPaused) {
+          liveInterval = setTimeout(fetchLiveJSON, livePollingInterval);
+        }
       }
     }
 
@@ -1023,11 +1036,12 @@
 
     function startLivePlot() {
       stopLivePlot();
-      liveInterval = setInterval(fetchLiveJSON, 100);
+      livePollingInterval = MIN_POLLING_INTERVAL;
+      liveInterval = setTimeout(fetchLiveJSON, livePollingInterval);
       renderInterval = setInterval(renderBufferedData, RENDER_INTERVAL);
     }
     function stopLivePlot() {
-      clearInterval(liveInterval);
+      clearTimeout(liveInterval);
       clearInterval(renderInterval);
     }
 
