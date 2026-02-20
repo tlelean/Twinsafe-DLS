@@ -164,7 +164,7 @@ def select_details_file(payload: DetailsSelection):
     try:
         opc.write("filename_details_production", filename)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"OPC write failed: {e}")
+        raise HTTPException(status_code=503, detail=f"OPC write failed: {e}")
 
     return {"ok": True, "filename": filename}
 
@@ -173,9 +173,9 @@ def get_current_ots_number():
     try:
         ots = opc.read("ots_number")
     except KeyError:
-        raise HTTPException(status_code=500, detail="OPC node missing 'ots_number_production'")
+        raise HTTPException(status_code=500, detail="OPC node missing 'ots_number'")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"OPC read failed: {e}")
+        raise HTTPException(status_code=503, detail=f"OPC read failed: {e}")
 
     return {"ots_number": str(ots).strip() if ots is not None else ""}
 
